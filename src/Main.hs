@@ -25,10 +25,11 @@ load file | isJar file = do contents <- B.readFile file
 load file | isClass file = do bytes <- B.readFile file
                               return [JCP.parse bytes]
 
-main = do classes <- mapM (load) sources
-          print $ concat $ classes
-     
+main = do classes <- concat `liftM` mapM (load) sources
+          let classloaders = filter ((=="java/lang/ClassLoader") . JCP.clsSuper) classes
+          print classloaders
 
-          
+
+
 
 
