@@ -37,7 +37,7 @@ import Data.Int (Int64)
 import Data.ByteString (unpack)
 import qualified Data.ByteString.Lazy as L (ByteString, take, unpack)
 
-import Data.List (unfoldr, intersperse)
+import Data.List (unfoldr, intersperse, isPrefixOf)
 import Data.Maybe (fromJust)
 
 import Data.Binary
@@ -141,19 +141,20 @@ parseDesc s = parseDesc' (toString s)
 
         parseDesc' s     = Left $ fst $ fromJust $ oneType s
 
-        oneType :: String -> Maybe (JType, String)
-        oneType ('[':s) = let (t, rest) = fromJust $ oneType s   in Just (TArray t, rest)
-        oneType ('L':s) = let (name, ';':rest) = span (/= ';') s in Just (TInstance name, rest)
-        oneType ('B':s) = Just (TByte, s)
-        oneType ('C':s) = Just (TChar, s)
-        oneType ('D':s) = Just (TDouble, s)
-        oneType ('F':s) = Just (TFloat, s)
-        oneType ('I':s) = Just (TInt, s)
-        oneType ('J':s) = Just (TLong, s)
-        oneType ('S':s) = Just (TShort, s)
-        oneType ('Z':s) = Just (TBoolean, s)
-        oneType (c:_)   = error $ "Failed to parse type " ++ show c
-        oneType []      = Nothing
+-- TODO: maybe to Types?
+oneType :: String -> Maybe (JType, String)
+oneType ('[':s) = let (t, rest) = fromJust $ oneType s   in Just (TArray t, rest)
+oneType ('L':s) = let (name, ';':rest) = span (/= ';') s in Just (TInstance name, rest)
+oneType ('B':s) = Just (TByte, s)
+oneType ('C':s) = Just (TChar, s)
+oneType ('D':s) = Just (TDouble, s)
+oneType ('F':s) = Just (TFloat, s)
+oneType ('I':s) = Just (TInt, s)
+oneType ('J':s) = Just (TLong, s)
+oneType ('S':s) = Just (TShort, s)
+oneType ('Z':s) = Just (TBoolean, s)
+oneType (c:_)   = error $ "Failed to parse type " ++ show c
+oneType []      = Nothing
 
 
 parseFieldType :: JString -> JType
@@ -209,7 +210,10 @@ getClassName cp idx = case cpEntry cp idx of
                           _           -> error $ "There is no class reference at idx " ++ (show idx)                   
 
 getJType :: ConstantPool -> Int -> JType
-getJType = error "TODO: getJType"
+getJType cp idx = if "[" `isPrefixOf` name 
+                      then fst $ fromJust $ oneType name 
+                      else TInstance name
+                  where name = getClassName cp idx
 
 getConstant :: ConstantPool -> Int -> Constant
 getConstant cp i = case cpEntry cp i of
