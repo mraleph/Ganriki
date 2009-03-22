@@ -7,19 +7,29 @@ module Java.ClassParser.ConstantPool (
 ,   msParams
 ,   msRetval
 ,   cpiName
-,   cpiClass
-,   cpiType
-,   cpiSig
 ,   cpiStrValue
 ,   cpiIntValue
 ,   cpiFloatValue
 ,   cpiLongValue
 ,   cpiDoubleValue
+,   cpiFieldRef
+,   cpiMethodRef
 ,   parseFieldType
 ,   parseMethodSig
+,   FieldRef
+,   MethodRef
+,   frClass, frName, frType
+,   mrClass, mrName, mrSig
+,   getFieldRef
+,   getMethodRef
+,   getClassName
+,   getJType
+,   getConstant
 ) where
 
 import Java.Types
+
+import Data.Array
 
 import Control.Monad (liftM, forM)
 import Data.Word (Word8, Word16)
@@ -27,7 +37,7 @@ import Data.Int (Int64)
 import Data.ByteString (unpack)
 import qualified Data.ByteString.Lazy as L (ByteString, take, unpack)
 
-import Data.List (unfoldr)
+import Data.List (unfoldr, intersperse)
 import Data.Maybe (fromJust)
 
 import Data.Binary
@@ -35,22 +45,36 @@ import Data.Binary.Get
 
 -- introduce correction, after long/double must follow emtpy CNone
 -- also prepend CNone
-newtype ConstantPool = ConstantPool { cpEntries :: [ConstantPoolInfo] }
+newtype ConstantPool = ConstantPool { cpEntries :: Array Int ConstantPoolInfo }
 
-data MethodSig  = MethodSig  { msParams :: [JType], msRetval :: Maybe JType            } deriving (Show)
+data MethodSig  = MethodSig  { msParams :: [JType], msRetval :: Maybe JType            }
 
-data ConstantPoolInfo = CClass           { cpiName  :: JString                                            }
-                      | CField           { cpiClass :: JString, cpiName :: JString, cpiType :: JType      }
-                      | CMethod          { cpiClass :: JString, cpiName :: JString, cpiSig  :: MethodSig  }
-                      | CInterfaceMethod { cpiClass :: JString, cpiName :: JString, cpiSig  :: MethodSig  }
-                      | CString          { cpiStrValue    :: JString                                      }
-                      | CInteger         { cpiIntValue    :: JInt                                         }
-                      | CFloat           { cpiFloatValue  :: JFloat                                       }
-                      | CLong            { cpiLongValue   :: JLong                                        }
-                      | CDouble          { cpiDoubleValue :: JDouble                                      }
-                      | CNameAndType     { cpiName :: JString, cpiDesc :: Either JType MethodSig          }
-                      | CUTF8            { cpiStrValue    :: JString                                      }
-                      | CNone
+instance Show MethodSig where
+   show (MethodSig p r) = "(" ++ ps ++ ")" ++ (maybe "" ((" => " ++) . show) r)
+                        where ps = concat $ intersperse ", " $ map show p
+
+data FieldRef   = FieldRef  { frClass :: String, frName :: String, frType :: JType     }
+data MethodRef  = MethodRef { mrClass :: String, mrName :: String, mrSig  :: MethodSig }
+
+instance Show FieldRef where
+  show (FieldRef h n t) = h ++ "." ++ n
+
+instance Show MethodRef where
+  show (MethodRef h n s) = h ++ "." ++ n ++ (show s)
+
+
+data ConstantPoolInfo = CPClass           { cpiName  :: JString                                   }
+                      | CPField           { cpiFieldRef :: FieldRef                               }
+                      | CPMethod          { cpiMethodRef :: MethodRef                             }
+                      | CPInterfaceMethod { cpiMethodRef :: MethodRef                             }
+                      | CPString          { cpiStrValue    :: JString                             }
+                      | CPInteger         { cpiIntValue    :: JInt                                }
+                      | CPFloat           { cpiFloatValue  :: JFloat                              }
+                      | CPLong            { cpiLongValue   :: JLong                               }
+                      | CPDouble          { cpiDoubleValue :: JDouble                             }
+                      | CPNameAndType     { cpiName :: JString, cpiDesc :: Either JType MethodSig }
+                      | CPUTF8            { cpiStrValue    :: JString                             }
+                      | CPNone
                       deriving (Show)
 
 parseConstantPool :: Int -> Get ConstantPool
@@ -61,44 +85,44 @@ parseConstantPool n = do s <- getRemainingLazyByteString
 
 parse' :: Int -> L.ByteString -> (Int64, ConstantPool)
 parse' n s = (cpSize, cp)
-   where getEntries pos = do entry <- parseEntry cp pos
-                             let newpos    = if isDoubleEntry entry then pos + 2 else pos + 1
-                             let entries x = if isDoubleEntry entry then entry:CNone:x else entry:x
-                             if newpos >= n then return $ entries []
-                                            else entries `liftM` getEntries newpos
+   where getEntries pos = do
+             tag   <- readByte
+             entry <- parseEntry cp pos tag
+             let newpos    = if isDoubleEntry tag then pos + 2 else pos + 1             
+             if newpos > n then return $ [(pos, entry)]
+                           else ((pos, entry) : ) `liftM` getEntries newpos
 
-         (cp, _, cpSize) = runGetState ((ConstantPool . (CNone:)) `liftM` getEntries 0) s 0
+         (cp, _, cpSize) = runGetState ((ConstantPool . array (1, n)) `liftM` getEntries 1) s 0
 
-         isDoubleEntry (CLong _)   = True
-         isDoubleEntry (CDouble _) = True
-         isDoubleEntry _           = False
+         isDoubleEntry 5 = True
+         isDoubleEntry 6 = True
+         isDoubleEntry _ = False
 
 
-parseEntry :: ConstantPool -> Int -> Get ConstantPoolInfo
-parseEntry cp i = do
-    tag <- readByte
+parseEntry :: ConstantPool -> Int -> Word8 -> Get ConstantPoolInfo
+parseEntry cp i tag =
     case tag of
         1  -> do len <- readInt16  -- CONSTANT_Utf8_info
-                 (CUTF8 . fromBits) `liftM` readBytes len
+                 CPUTF8 `liftM` readJString len
         2  -> error "Tag 2 is unused"
-        3  -> (CInteger . fromBits)                `liftM` readBytes 4 -- CONSTANT_Integer_info
-        4  -> (CFloat . fromBits)                  `liftM` readBytes 4 -- CONSTANT_Float_info
-        5  -> (CLong . fromBits)                   `liftM` readBytes 8 -- CONSTANT_Long_info
-        6  -> (CDouble . fromBits)                 `liftM` readBytes 8 -- CONSTANT_Double_info
-        7  -> (CClass . cpiStrValue . cpEntry cp)  `liftM` readInt16  -- CONSTANT_Class_info
-        8  -> (CString . cpiStrValue . cpEntry cp) `liftM` readInt16 -- CONSTANT_String_info
+        3  -> CPInteger `liftM` readJInt    -- CONSTANT_Integer_info
+        4  -> CPFloat   `liftM` readJFloat  -- CONSTANT_Float_info
+        5  -> CPLong    `liftM` readJLong   -- CONSTANT_Long_info
+        6  -> CPDouble  `liftM` readJDouble -- CONSTANT_Double_info
+        7  -> (CPClass . cpiStrValue . cpEntry cp)  `liftM` readInt16  -- CONSTANT_Class_info
+        8  -> (CPString . cpiStrValue . cpEntry cp) `liftM` readInt16 -- CONSTANT_String_info
         9  -> do clazz <- readInt16            -- CONSTANT_Fieldref_info
                  nat   <- readInt16
                  return $ mkFieldInfo (cpiName $ cpEntry cp clazz) (cpEntry cp nat)
-        10 -> do clazz <- readInt16            -- CONSTANT_Methodref_info
+        10 -> do clazz <- readInt16            -- CONSTANT_Methodref_info               
                  nat   <- readInt16
                  return $ mkMethodInfo (cpiName $ cpEntry cp clazz) (cpEntry cp nat)
         11 -> do clazz <- readInt16            -- CONSTANT_InterfaceMethodref_info
-                 nat   <- readInt16
+                 nat   <- readInt16                 
                  return $ mkInterfaceMethodInfo (cpiName $ cpEntry cp clazz) (cpEntry cp nat)
         12 -> do name <- readInt16
                  desc <- readInt16
-                 return $ CNameAndType (cpiStrValue $ cpEntry cp name) (parseDesc $ cpiStrValue $ cpEntry cp desc)
+                 return $ CPNameAndType (cpiStrValue $ cpEntry cp name) (parseDesc $ cpiStrValue $ cpEntry cp desc)
         _  -> error $ "Unknown tag " ++ show tag ++ " in CP"
 
 ------------------------------------------------------------------------------------------------------------------
@@ -139,18 +163,18 @@ parseMethodSig :: JString -> MethodSig
 parseMethodSig = (\(Right t) -> t) . parseDesc
 
 cpEntry :: ConstantPool -> Int -> ConstantPoolInfo
-cpEntry cp idx = (cpEntries cp) !! idx
+cpEntry cp idx = (cpEntries cp) ! idx
 
 mkFieldInfo :: JString -> ConstantPoolInfo -> ConstantPoolInfo
-mkFieldInfo host (CNameAndType nam (Left typ)) = CField host nam typ
+mkFieldInfo host (CPNameAndType nam (Left typ)) = CPField $ FieldRef (toString host) (toString nam) typ
 mkFieldInfo _ cpi = error $ "Expected NameAndType, but got " ++ (show cpi) ++ " instead"
 
 mkMethodInfo :: JString -> ConstantPoolInfo -> ConstantPoolInfo
-mkMethodInfo host (CNameAndType nam (Right sig)) = CMethod host nam sig
+mkMethodInfo host (CPNameAndType nam (Right sig)) = CPMethod $ MethodRef (toString host) (toString nam) sig
 mkMethodInfo _ cpi = error $ "Expected NameAndType, but got " ++ (show cpi) ++ " instead"
 
 mkInterfaceMethodInfo :: JString -> ConstantPoolInfo -> ConstantPoolInfo
-mkInterfaceMethodInfo host (CNameAndType nam (Right sig)) = CInterfaceMethod host nam sig
+mkInterfaceMethodInfo host (CPNameAndType nam (Right sig)) = CPInterfaceMethod $ MethodRef (toString host) (toString nam) sig
 
 readBytes :: Int -> Get [Word8]
 readBytes n = unpack `liftM` (getBytes n)
@@ -166,5 +190,31 @@ readInt16 = fromIntegral `liftM` readWord16
 
 
 
+getFieldRef :: ConstantPool -> Int -> FieldRef
+getFieldRef cp idx = case cpEntry cp idx of
+                          CPField ref          -> ref
+                          _                   -> error $ "There is no field reference at idx " ++ (show idx)
 
 
+getMethodRef :: ConstantPool -> Int -> MethodRef
+getMethodRef cp idx = case cpEntry cp idx of
+                          CPMethod ref          -> ref
+                          CPInterfaceMethod ref -> ref
+                          _                    -> error $ "There is no method reference at idx " ++ (show idx)
+  
+        
+getClassName :: ConstantPool -> Int -> String
+getClassName cp idx = case cpEntry cp idx of
+                          CPClass name -> toString name
+                          _           -> error $ "There is no class reference at idx " ++ (show idx)                   
+
+getJType :: ConstantPool -> Int -> JType
+getJType = error "TODO: getJType"
+
+getConstant :: ConstantPool -> Int -> Constant
+getConstant cp i = case cpEntry cp i of
+                       CPString  s -> toConstant s
+                       CPInteger i -> toConstant i
+                       CPLong    l -> toConstant l
+                       CPFloat   f -> toConstant f                               
+                       CPDouble  d -> toConstant d

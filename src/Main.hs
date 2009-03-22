@@ -1,5 +1,7 @@
 module Main where
 
+import System.Environment (getArgs)
+
 import Codec.Archive.Zip;
 import qualified Data.ByteString.Lazy   as B;
 import qualified Java.ClassParser.Class as JCP;
@@ -22,12 +24,13 @@ load file | isJar file = do contents <- B.readFile file
                             let classes = map (JCP.parse . fromEntry) entries
                             return classes
 
-load file | isClass file = do bytes <- B.readFile file
+load file | isClass file = do bytes <- B.readFile file                              
                               return [JCP.parse bytes]
 
-main = do classes <- concat `liftM` mapM (load) sources
-          let classloaders = filter ((=="java/lang/ClassLoader") . JCP.clsSuper) classes
-          print classloaders
+main = do sources <- getArgs
+          classes <- concat `liftM` mapM (load) sources
+          --let classloaders = filter ((=="java/lang/ClassLoader") . JCP.clsSuper) classes
+          print classes -- classloaders
 
 
 
