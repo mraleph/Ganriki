@@ -1,13 +1,24 @@
-module Java.ClassParser.Instructions (VMOp, parseCode) where
+{-# LANGUAGE BangPatterns #-}
 
+module Java.ClassParser.Instructions (parseCode, Bytecode) where
+
+
+import Data.Maybe (fromJust)
+import Control.Monad (ap)
+import Control.Monad.Loops (whileM)
 import Control.Monad.Reader
+import Control.Arrow (second)
 
 import Data.Array
 
-import Data.Int (Int32, Int64)
+import Data.Word (Word8, Word16, Word32)
 
-import Data.Binary
-import Data.Binary.Get
+import Data.Int (Int16, Int32, Int64)
+
+import Data.Binary (get)
+import Data.Binary.Strict.Get
+
+import qualified Data.ByteString as StrictB
 
 import qualified Java.Types as T (toString, Constant(..), JType(..))
 import Java.ClassParser.ConstantPool (ConstantPool, FieldRef, MethodRef, getFieldRef, getMethodRef, getClassName, getJType, cpEntry, ConstantPoolInfo(..), getConstant)
@@ -99,35 +110,74 @@ data VMOp = Nop
           | MonitorEnter
           | MonitorExit
           | MultiNew { multiarraytype :: ArrayType, dimensions :: Int }          
-          | LookupSwitch { lookuptable :: [(Int32, Int32)], def :: Int32 }
-          | TableSwitch { tablelow :: Int32, tablehigh :: Int32, tableoffs :: [Int32] }
+          | LookupSwitch { lookuptable :: [(Int32, Int)], def :: Int }
+          | TableSwitch { tablelow :: Int32, tablehigh :: Int32, tableoffs :: [Int], def :: Int }
           deriving (Show)
 
 
+data Bytecode = Bytecode { bcCode :: [VMOp], bcLabels :: [Int] }
 
+instance Show Bytecode where
+    show b = unlines $ map (("\t\t" ++) . show) $ bcCode b
 
-type CPGet a = ReaderT ConstantPool Get a
+data St  = St 
+           { stConstantPool :: ConstantPool
+           , stLabel        :: Int -> Int
+           , stOffset       :: Int
+           }
+
+type CPGet a = ReaderT St Get a
 
 data VMInstruction = VMInstruction { vmiName :: String, vmiOpcode :: Int, vmiParse :: CPGet VMOp }
-      
-parseCode :: ConstantPool -> Get [VMOp]
-parseCode = parseCode' [] 
 
--- TODO think about this shit function for a while
-parseCode' :: [VMOp] -> ConstantPool -> Get [VMOp]
-parseCode' ops cp = do
+parseCode :: ConstantPool -> StrictB.ByteString -> Bytecode 
+parseCode cp code = Bytecode ops []
+    where
+        (o2i, ops) = fromRight $ fst $ runGet (parseCode' cp label 0) code
+        
+        label offs = case lookup offs o2i of
+                         Nothing  -> error $ "Offset " ++ (show offs) ++ " not found in offset table: " ++ (show o2i)
+                         Just idx -> idx
+
+        fromRight x = case x of
+                          Left s  -> error s
+                          Right v -> v
+
+{-    
+    where 
+        -- TODO: think whether possible to elegantly generate labels during parsing?
+        offs2index :: [(Int, VMOp)] -> Int -> [(Int, Int)]
+        labels ((offs, _):ops) i =  (offs, i):(offs2index ops (i + 1))
+
+        mkLabels :: [(Int, Int)] -> [(Int, VMOp)] -> ([VMOp], [Int]) -> ([VMOp], [Int])
+        mkLabels l2i (op:ops) (ops', labels')  = case op of
+                                                 GotoIf _ _ -> 
+                                                 Goto _     ->
+                                                 JSR _      ->
+                                                 x          -> mkLabels 
+        mkLabels l2i []       (ops', labels')  = (reverse ops', reverse labels')
+-}
+        
+
+
+
+parseCode' :: ConstantPool -> (Int -> Int) -> Int -> Get ([(Int, Int)], [VMOp])
+parseCode' cp label idx = do
     empty <- isEmpty
     if empty 
-        then return $ reverse $ ops
-        else do opcode <- fromIntegral `liftM` (get :: Get Word8) -- TODO: create utilities module!
-                let instr = instructionSet ! opcode    
-                op <- runReaderT ( vmiParse instr ) cp
-                parseCode' (op:ops) cp
-    
+        then return ([], [])
+        else do 
+            offs   <- bytesRead;
+            opcode <- fromIntegral `liftM` getWord8;
+            let instr = instructionSet ! opcode;
+            op         <- runReaderT (vmiParse instr) (St cp label offs)
+            (o2i, ops) <- parseCode' cp label (idx+1)
+            return $ ((offs, idx):o2i, op:ops)
+
 
 instructionSet :: Array Int VMInstruction
 instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [    
-    VMInstruction "nop"           0 $ return Nop
+    VMInstruction "nop"           0     $ return Nop
     ,   VMInstruction "aconst_null"   1 $ return $ Push $ T.CNull
     ,   VMInstruction "iconst_m1"     2 $ return $ Push $ T.CInt (-1)
     ,   VMInstruction "iconst_0"      3 $ return $ Push $ T.CInt 0
@@ -147,9 +197,9 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "bipush"       16 $ (Push . T.CByte  ) `liftM` readByte
     ,   VMInstruction "sipush"       17 $ (Push . T.CShort ) `liftM` readShort
 
-    ,   VMInstruction "ldc"          18 $ Push `liftM` (liftM2 getConstant ask readByte)
-    ,   VMInstruction "ldc_w"        19 $ Push `liftM` (liftM2 getConstant ask readShort)
-    ,   VMInstruction "ldc2_w"       20 $ Push `liftM` (liftM2 getConstant ask readShort)
+    ,   VMInstruction "ldc"          18 $ Push `liftM` (liftM2 getConstant getCP readByte)
+    ,   VMInstruction "ldc_w"        19 $ Push `liftM` (liftM2 getConstant getCP readShort)
+    ,   VMInstruction "ldc2_w"       20 $ Push `liftM` (liftM2 getConstant getCP readShort)
 
     ,   VMInstruction "iload"        21 $ (Load TInt)    `liftM` readByte
     ,   VMInstruction "lload"        22 $ (Load TLong)   `liftM` readByte
@@ -302,23 +352,23 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "dcmpl"       151 $ return $ Cmp TDouble  -- todo: g/l difference
     ,   VMInstruction "dcmpg"       152 $ return $ Cmp TDouble  -- todo: g/l difference
 
-    ,   VMInstruction "ifeq"        153 $ GotoIf ZEq   `liftM` readShort
-    ,   VMInstruction "ifne"        154 $ GotoIf ZNe   `liftM` readShort
-    ,   VMInstruction "iflt"        155 $ GotoIf ZLt   `liftM` readShort
-    ,   VMInstruction "ifge"        156 $ GotoIf ZGe   `liftM` readShort
-    ,   VMInstruction "ifgt"        157 $ GotoIf ZGt   `liftM` readShort
-    ,   VMInstruction "ifle"        158 $ GotoIf ZLe   `liftM` readShort
-    ,   VMInstruction "if_icmpeq"   159 $ GotoIf Eq    `liftM` readShort
-    ,   VMInstruction "if_icmpne"   160 $ GotoIf Ne    `liftM` readShort
-    ,   VMInstruction "if_icmplt"   161 $ GotoIf Lt    `liftM` readShort
-    ,   VMInstruction "if_icmpge"   162 $ GotoIf Ge    `liftM` readShort
-    ,   VMInstruction "if_icmpgt"   163 $ GotoIf Gt    `liftM` readShort
-    ,   VMInstruction "if_icmple"   164 $ GotoIf Le    `liftM` readShort
-    ,   VMInstruction "if_acmpeq"   165 $ GotoIf RefEq `liftM` readShort
-    ,   VMInstruction "if_acmpne"   166 $ GotoIf RefNe `liftM` readShort
-    ,   VMInstruction "goto"        167 $ Goto `liftM` readShort
-    ,   VMInstruction "jsr"         168 $ JSR  `liftM` readShort
-    ,   VMInstruction "ret"         169 $ Ret  `liftM` readByte
+    ,   VMInstruction "ifeq"        153 $ GotoIf ZEq   `liftM` readShortBranchOffset
+    ,   VMInstruction "ifne"        154 $ GotoIf ZNe   `liftM` readShortBranchOffset
+    ,   VMInstruction "iflt"        155 $ GotoIf ZLt   `liftM` readShortBranchOffset
+    ,   VMInstruction "ifge"        156 $ GotoIf ZGe   `liftM` readShortBranchOffset
+    ,   VMInstruction "ifgt"        157 $ GotoIf ZGt   `liftM` readShortBranchOffset
+    ,   VMInstruction "ifle"        158 $ GotoIf ZLe   `liftM` readShortBranchOffset
+    ,   VMInstruction "if_icmpeq"   159 $ GotoIf Eq    `liftM` readShortBranchOffset
+    ,   VMInstruction "if_icmpne"   160 $ GotoIf Ne    `liftM` readShortBranchOffset
+    ,   VMInstruction "if_icmplt"   161 $ GotoIf Lt    `liftM` readShortBranchOffset
+    ,   VMInstruction "if_icmpge"   162 $ GotoIf Ge    `liftM` readShortBranchOffset
+    ,   VMInstruction "if_icmpgt"   163 $ GotoIf Gt    `liftM` readShortBranchOffset
+    ,   VMInstruction "if_icmple"   164 $ GotoIf Le    `liftM` readShortBranchOffset
+    ,   VMInstruction "if_acmpeq"   165 $ GotoIf RefEq `liftM` readShortBranchOffset
+    ,   VMInstruction "if_acmpne"   166 $ GotoIf RefNe `liftM` readShortBranchOffset
+    ,   VMInstruction "goto"        167 $ Goto         `liftM` readShortBranchOffset
+    ,   VMInstruction "jsr"         168 $ JSR          `liftM` readShortBranchOffset
+    ,   VMInstruction "ret"         169 $ Ret          `liftM` readByte
 
     ,   VMInstruction "tableswitch"  170 $ tableswitch
     ,   VMInstruction "lookupswitch" 171 $ lookupswitch
@@ -339,7 +389,7 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "invokevirtual"   182 $ InvokeVirtual `liftM` readMethodRef
     ,   VMInstruction "invokespecial"   183 $ InvokeSpecial `liftM` readMethodRef
     ,   VMInstruction "invokestatic"    184 $ InvokeStatic  `liftM` readMethodRef
-    ,   VMInstruction "invokeinterface" 185 $ do { ref <- readShort; lift $ skip 2; cp <- ask; return $ InvokeInterface $ getMethodRef cp ref }
+    ,   VMInstruction "invokeinterface" 185 $ do { ref <- readShort; lift $ skip 2;  cp <- getCP; return $ InvokeInterface $ getMethodRef cp ref }
 
     ,   VMInstruction "new"           187 $ New `liftM` readClassName
 
@@ -363,7 +413,7 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "ifnonnull"   199 $ (GotoIf NotNull) `liftM` readShort
     ,   VMInstruction "goto_w"      200 $ Goto `liftM` readInt
     ,   VMInstruction "jsr_w"       201 $ JSR  `liftM` readInt] 
-    where
+    where        
         fromAType   :: Int -> VMOperandType
         fromAType  4 = TBoolean
         fromAType  5 = TChar 
@@ -378,9 +428,24 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
         getArrayType :: ConstantPool -> Int -> ArrayType
         getArrayType cp i = uncurry ArrayType $ jtype2arraytype $ getJType cp i
 
+        getCP     = stConstantPool `liftM` ask        
+        getOpOffs = stOffset       `liftM` ask
+        label     = stLabel        `liftM` ask
+
+        readIntBranchOffset :: CPGet Int
+        readIntBranchOffset = do
+            label `ap` liftM2 (+) readSignedInt getOpOffs
+
+
+        readShortBranchOffset :: CPGet Int
+        readShortBranchOffset = do
+            label `ap` liftM2 (+) readSignedShort getOpOffs
+            
+
+
         jtype2arraytype :: T.JType -> (Either VMOperandType String, Int)
         jtype2arraytype (T.TArray b) = case b of 
-                                           T.TArray _    -> let (b', i) = jtype2arraytype b in (b', i + 1)
+                                           T.TArray _    -> second (+1) $ jtype2arraytype b
                                            T.TInstance i -> (Right i, 0)
                                            T.TByte       -> (Left TByte, 0)
                                            T.TChar       -> (Left TChar, 0)
@@ -392,21 +457,33 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
                                            T.TBoolean    -> (Left TBoolean, 0)
 
 
-        readShort :: Integral a => CPGet a
-        readShort = lift (fromIntegral `liftM` (get :: Get Word16)) -- TODO [!!!] to utilities module 
-        
         readByte :: Integral a => CPGet a
-        readByte = lift (fromIntegral `liftM` (get :: Get Word8)) -- TODO [!!!] to utilities module 
+        readByte = lift (fromIntegral `liftM` getWord8) 
+
+        readShort :: Integral a => CPGet a
+        readShort = lift (fromIntegral `liftM` getWord16be)
         
         readInt :: Integral a => CPGet a
-        readInt = lift (fromIntegral `liftM` (get :: Get Word32)) -- TODO [!!!] to utilities module 
+        readInt = lift (fromIntegral `liftM` getWord32be)
 
-        readFieldRef  = liftM2 getFieldRef ask readShort
-        readMethodRef = liftM2 getMethodRef ask readShort
-        readClassName = liftM2 getClassName ask readShort 
-        readArrayType = liftM2 getArrayType ask readShort 
+        readSignedShort :: CPGet Int
+        readSignedShort = lift ((fromIntegral . u16_to_s16) `liftM` getWord16be)
 
-        pad :: Int64 -> CPGet ()
+        readSignedInt   :: CPGet Int
+        readSignedInt   = lift ((fromIntegral . u32_to_s32) `liftM` getWord32be)
+
+        u16_to_s16 :: Word16 -> Int16
+        u16_to_s16 = fromIntegral
+
+        u32_to_s32 :: Word32 -> Int32
+        u32_to_s32 = fromIntegral        
+
+        readFieldRef  = liftM2 getFieldRef  getCP readShort
+        readMethodRef = liftM2 getMethodRef getCP readShort
+        readClassName = liftM2 getClassName getCP readShort 
+        readArrayType = liftM2 getArrayType getCP readShort 
+
+        pad :: Int -> CPGet ()
         pad n = do
             offs <- lift bytesRead
             let m = offs `mod` n
@@ -414,18 +491,18 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
 
         lookupswitch = do
             pad 4
-            def     <- readInt
+            def     <- readIntBranchOffset
             npairs  <- readInt
-            pairs   <- replicateM npairs (liftM2 (,) readInt readInt)
+            pairs   <- replicateM npairs (liftM2 (,) readInt readIntBranchOffset)
             return $ LookupSwitch pairs def
 
         tableswitch = do
             pad 4
-            def  <- readInt
+            def  <- readIntBranchOffset
             low  <- readInt
             high <- readInt
-            offs <- replicateM (fromIntegral $ high - low + 1) readInt
-            return $ TableSwitch low high offs
+            offs <- replicateM (fromIntegral $ high - low + 1) readIntBranchOffset
+            return $ TableSwitch low high offs def
 
         parseWide = do
             opcode <- readByte

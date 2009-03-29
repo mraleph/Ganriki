@@ -35,7 +35,7 @@ import Control.Monad (liftM, forM)
 import Data.Word (Word8, Word16)
 import Data.Int (Int64)
 import Data.ByteString (unpack)
-import qualified Data.ByteString.Lazy as L (ByteString, take, unpack)
+import qualified Data.ByteString.Lazy as L (ByteString)
 
 import Data.List (unfoldr, intersperse, isPrefixOf)
 import Data.Maybe (fromJust)
@@ -176,9 +176,6 @@ mkMethodInfo _ cpi = error $ "Expected NameAndType, but got " ++ (show cpi) ++ "
 
 mkInterfaceMethodInfo :: JString -> ConstantPoolInfo -> ConstantPoolInfo
 mkInterfaceMethodInfo host (CPNameAndType nam (Right sig)) = CPInterfaceMethod $ MethodRef (toString host) (toString nam) sig
-
-readBytes :: Int -> Get [Word8]
-readBytes n = unpack `liftM` (getBytes n)
 
 readByte :: Get Word8
 readByte = get

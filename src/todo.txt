@@ -1,2 +1,2 @@
-
-use something else instead of Show
+TODO use something else instead of Show
+TODO think about providing lifted versions of Get functions in CPGet monad

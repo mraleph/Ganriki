@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Java.Types (
     JType(..)
@@ -57,13 +58,13 @@ newtype JFloat  = JFloat  Float deriving (Show)
 newtype JDouble = JDouble Double deriving (Show)
 
 data Constant = CNull
-              | CString String
-              | CByte   Int32
-              | CShort  Int32
-              | CInt    Int32
-              | CLong   Int64
-              | CFloat  Float
-              | CDouble Double
+              | CString !String
+              | CByte   !Int32
+              | CShort  !Int32
+              | CInt    !Int32
+              | CLong   !Int64
+              | CFloat  !Float
+              | CDouble !Double
 
 instance Show Constant where
     show v = case v of 

@@ -62,7 +62,7 @@ data ExceptionHandlerInfo = ExceptionHandlerInfo {
 data MethodCode = MethodCode {
                       mcMaxStack  :: Int
                   ,   mcMaxLocals :: Int
-                  ,   mcCode      :: [I.VMOp]
+                  ,   mcCode      :: I.Bytecode
                   ,   mcHandlers  :: [ExceptionHandlerInfo]
                   }
 
@@ -71,7 +71,8 @@ data Method = Method { mAccess :: Access, mName :: JString, mSig  :: MethodSig, 
 data Field  = Field  { fAccess :: Access, fName :: JString, fType :: JType, fAttributes :: Attributes } deriving (Show)
 
 instance Show Method where
-    show (Method a n s c) = "\t" ++ (toString n) ++ " " ++ (show s) ++ (maybe " = 0" (("\n" ++) . unlines . (map (("\t\t" ++) . show)) . mcCode) c)
+    --show (Method a n s c) = "\t" ++ (toString n) ++ " " ++ (show s) ++ (maybe " = 0" (("\n" ++) . unlines . (map (("\t\t" ++) . show)) . mcCode) c)
+    show (Method a n s c) = "\t" ++ (toString n) ++ " " ++ (show s) ++ (maybe " = 0" ((("\n" ++) . show) . mcCode) c)
 
 type Attributes = M.Map String [Word8]
 
@@ -101,7 +102,7 @@ mkMethod cp a n s attrs =
     Method a n s $
         case M.lookup "Code" attrs of
             Nothing   -> Nothing
-            Just code -> Just $ runGet (parseCode cp) (B.pack code)         
+            Just code -> Just $ runGet (parseCode cp) (B.pack code)
 
 mkField :: ConstantPool -> Access -> JString -> JType -> Attributes -> Field
 mkField cp = Field
@@ -162,7 +163,7 @@ parseCode cp = do
     maxLocals      <- readInt16
     codeLength     <- readInt32
     bytecode       <- getBytes codeLength
-    let code = runGet (I.parseCode cp) (B.pack $ unpack bytecode)
+    let code = I.parseCode cp bytecode
     handlersLenght <- readInt16
     handlers       <- replicateM handlersLenght $ liftM4 ExceptionHandlerInfo readInt16 readInt16 readInt16 $ do idx <- readInt16
                                                                                                                  if idx == 0 then return Nothing else return $ Just $ getClassName cp idx
