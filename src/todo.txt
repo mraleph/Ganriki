@@ -1,2 +1,3 @@
+TODO Word* is unsigned, so some sing issues may arise, check!
 TODO use something else instead of Show
 TODO think about providing lifted versions of Get functions in CPGet monad
