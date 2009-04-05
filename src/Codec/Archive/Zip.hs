@@ -97,7 +97,7 @@ import Control.Monad
 data Archive = Archive
                 { zEntries                :: [Entry]              -- ^ Files in zip archive
                 , zSignature              :: Maybe B.ByteString   -- ^ Digital signature
-                , zComment                :: B.ByteString         -- ^ Comment for whole zip archive
+                , zComment                :: B.ByteString         -- ^ Comment for whole zip archive                
                 } deriving (Read, Show)
 
 -- | Representation of an archived file, including content and metadata.
@@ -129,8 +129,9 @@ data ZipOption = OptRecursive               -- ^ Recurse into directories when a
 emptyArchive :: Archive
 emptyArchive = Archive
                 { zEntries                  = []
-                , zSignature              = Nothing
-                , zComment                = B.empty }
+                , zSignature                = Nothing
+                , zComment                  = B.empty                
+                }
 
 -- | Reads an 'Archive' structure from a raw zip archive file.
 toArchive :: FilePath -> IO Archive
@@ -141,8 +142,8 @@ toArchive file = do
     hSeek handle AbsoluteSeek 0
     b <- B.hGetContents handle
     return $ runGet (getArchive b) (B.drop (fromIntegral $ cdeOffset cde) b)    
-            
 
+---------------------------------------------------------------------------------
                   
 ---------------------------------------------------------------------------------
 

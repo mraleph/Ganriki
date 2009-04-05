@@ -5,6 +5,7 @@ module Java.ClassParser.Class (
     , Class, clsName, clsSuper, clsIfaces, clsIsInterface, clsMethods
     , Method, mAccess, mName, mSig, mCode
     , MethodCode, mcMaxStack, mcMaxLocals, mcCode, mcHandlers    
+    , ExceptionHandlerInfo, ehiStartPC, ehiEndPC, ehiHandlerPC, ehiCatch
 ) where
 
 import qualified Data.ByteString.Lazy as B
@@ -64,7 +65,7 @@ data ExceptionHandlerInfo = ExceptionHandlerInfo {
                             ,   ehiEndPC     :: Int
                             ,   ehiHandlerPC :: Int
                             ,   ehiCatch     :: Maybe String
-                            }
+                            } deriving (Show)
 
 data MethodCode = MethodCode {
                       mcMaxStack  :: Int

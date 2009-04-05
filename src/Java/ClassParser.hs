@@ -3,13 +3,14 @@ module Java.ClassParser (
     , Class, clsName, clsSuper, clsIfaces, clsIsInterface, clsMethods
     , C.Method, C.mAccess, C.mName, C.mSig, C.mCode
     , C.MethodCode, C.mcMaxStack, C.mcMaxLocals, C.mcCode, C.mcHandlers
+    , C.ExceptionHandlerInfo, C.ehiStartPC, C.ehiEndPC, C.ehiHandlerPC, C.ehiCatch
     , VMOp(..), VMOperandType (..), bcCode
     -- platform classes
-    , java_lang_ArrayIndexOutOfBounds, java_lang_NullPointerException, java_lang_Throwable
-    , java_lang_ArithmeticException, java_lang_IncompatibleClassChangeException, java_lang_InstantiationError
+    , java_lang_ArrayIndexOutOfBoundsException, java_lang_NullPointerException, java_lang_Throwable
+    , java_lang_ArithmeticException, java_lang_IncompatibleClassChangeError, java_lang_InstantiationError
     , java_lang_NegativeArraySizeException, java_lang_ClassCastException, java_lang_IllegalMonitorStateException, java_lang_NoSuchMethodError
     , java_lang_NoSuchFieldError, java_lang_LinkageError, java_lang_AbstractMethodError, java_lang_IllegalAccessError, java_lang_ClassLoader
-    , LinkageContext, isSubClassOf, loadAndLinkAll, allClasses
+    , LinkageContext, isSubClassOf, loadAndLinkAll, allClasses, resolve, tryResolve
 ) where
 
 -- TODO move methods and related types to separate module
@@ -60,10 +61,11 @@ loadAndLinkAll files = linkAll (Just rtjar) `liftM` (loadAll files)
 ------------------------------------------------------------------
 
 isSubClassOf :: Class -> Class -> Bool
-isSubClassOf s p | clsName s == clsName p = True
-isSubClassOf s p | otherwise              = case clsSuper s of
-                                              Just c  -> c `isSubClassOf` p 
-                                              Nothing -> False
+isSubClassOf s p | trace "isSubClassOf s p (s == p)" True && clsName s == clsName p = True
+isSubClassOf s p | trace "isSubClassOf s p (otherwise)" True && otherwise = 
+    case clsSuper s of
+        Just c  -> c `isSubClassOf` p 
+        Nothing -> False
 
 ------------------------------------------------------------------
 
@@ -77,8 +79,8 @@ platformClass name = case tryResolve rtjar name of
 java_lang_ClassLoader :: Class
 java_lang_ClassLoader = platformClass "java/lang/ClassLoader"
 
-java_lang_ArrayIndexOutOfBounds :: Class
-java_lang_ArrayIndexOutOfBounds = platformClass "java/lang/ArrayIndexOutOfBounds"
+java_lang_ArrayIndexOutOfBoundsException :: Class
+java_lang_ArrayIndexOutOfBoundsException = platformClass "java/lang/ArrayIndexOutOfBoundsException"
 
 java_lang_NullPointerException :: Class
 java_lang_NullPointerException = platformClass "java/lang/NullPointerException"
@@ -89,8 +91,8 @@ java_lang_Throwable = platformClass "java/lang/Throwable"
 java_lang_ArithmeticException :: Class
 java_lang_ArithmeticException = platformClass "java/lang/ArithmeticException"
 
-java_lang_IncompatibleClassChangeException :: Class
-java_lang_IncompatibleClassChangeException = platformClass "java/lang/IncompatibleClassChangeException"
+java_lang_IncompatibleClassChangeError :: Class
+java_lang_IncompatibleClassChangeError = platformClass "java/lang/IncompatibleClassChangeError"
 
 java_lang_InstantiationError :: Class
 java_lang_InstantiationError = platformClass "java/lang/InstantiationError"

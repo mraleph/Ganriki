@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 module Java.ClassParser.ConstantPool (
     ConstantPool
 ,   cpEntry
@@ -63,17 +65,17 @@ instance Show MethodRef where
   show (MethodRef h n s) = h ++ "." ++ n ++ (show s)
 
 
-data ConstantPoolInfo = CPClass           { cpiName  :: JString                                   }
-                      | CPField           { cpiFieldRef :: FieldRef                               }
-                      | CPMethod          { cpiMethodRef :: MethodRef                             }
-                      | CPInterfaceMethod { cpiMethodRef :: MethodRef                             }
-                      | CPString          { cpiStrValue    :: JString                             }
-                      | CPInteger         { cpiIntValue    :: JInt                                }
-                      | CPFloat           { cpiFloatValue  :: JFloat                              }
-                      | CPLong            { cpiLongValue   :: JLong                               }
-                      | CPDouble          { cpiDoubleValue :: JDouble                             }
-                      | CPNameAndType     { cpiName :: JString, cpiDesc :: Either JType MethodSig }
-                      | CPUTF8            { cpiStrValue    :: JString                             }
+data ConstantPoolInfo = CPClass           { cpiName        :: JString                              }
+                      | CPField           { cpiFieldRef    :: FieldRef                             }
+                      | CPMethod          { cpiMethodRef   :: MethodRef                            }
+                      | CPInterfaceMethod { cpiMethodRef   :: MethodRef                            }
+                      | CPString          { cpiStrValue    :: JString                              }
+                      | CPInteger         { cpiIntValue    :: !JInt                                }
+                      | CPFloat           { cpiFloatValue  :: !JFloat                              }
+                      | CPLong            { cpiLongValue   :: !JLong                               }
+                      | CPDouble          { cpiDoubleValue :: !JDouble                             }
+                      | CPNameAndType     { cpiName :: JString, cpiDesc :: Either JType MethodSig  }
+                      | CPUTF8            { cpiStrValue    :: !JString                             }
                       | CPNone
                       deriving (Show)
 
@@ -86,7 +88,7 @@ parseConstantPool n = do s <- getRemainingLazyByteString
 parse' :: Int -> L.ByteString -> (Int64, ConstantPool)
 parse' n s = (cpSize, cp)
    where getEntries pos = do
-             tag   <- readByte
+             !tag   <- readByte
              entry <- parseEntry cp pos tag
              let newpos    = if isDoubleEntry tag then pos + 2 else pos + 1             
              if newpos > n then return $ [(pos, entry)]
