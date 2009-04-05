@@ -65,7 +65,14 @@ data ExceptionHandlerInfo = ExceptionHandlerInfo {
                             ,   ehiEndPC     :: Int
                             ,   ehiHandlerPC :: Int
                             ,   ehiCatch     :: Maybe String
-                            } deriving (Show)
+                            }
+
+instance Show ExceptionHandlerInfo where
+    show (ExceptionHandlerInfo s e h c) = "try [" ++ (show s) ++ ", " ++ (show e) ++ ") catch " ++ catch ++ " => " ++ (show h)
+        where 
+            catch = case c of
+                        Nothing -> "any"
+                        Just s  -> s
 
 data MethodCode = MethodCode {
                       mcMaxStack  :: Int
@@ -80,7 +87,9 @@ data Field  = Field  { fAccess :: Access, fName :: String, fType :: JType, fAttr
 
 instance Show Method where
     --show (Method a n s c) = "\t" ++ (toString n) ++ " " ++ (show s) ++ (maybe " = 0" (("\n" ++) . unlines . (map (("\t\t" ++) . show)) . mcCode) c)
-    show (Method a n s c) = "\t" ++ n ++ " " ++ (show s) ++ (maybe " = 0" ((("\n" ++) . show) . mcCode) c)
+    show (Method a n s Nothing)  = "\t" ++ n ++ " " ++ (show s) ++ " = 0"
+    show (Method a n s (Just c)) = "\t" ++ n ++ " " ++ (show s) ++ "\n" ++ (show $ mcCode c) ++ "\t" ++ (unlines $ map show $ mcHandlers c) ++ "\n"
+    
 
 type Attributes = M.Map String [Word8]
 
@@ -172,9 +181,11 @@ parseCode cp = do
     maxLocals      <- readInt16
     codeLength     <- readInt32
     bytecode       <- getBytes codeLength
-    let code = I.parseCode cp bytecode
+    let (code, label)    = I.parseCode cp bytecode
+    let readBranchTarget = (label `liftM` readInt16)
     handlersLenght <- readInt16
-    handlers       <- replicateM handlersLenght $ liftM4 ExceptionHandlerInfo readInt16 readInt16 readInt16 $ do idx <- readInt16
+    handlers       <- replicateM handlersLenght $ liftM4 ExceptionHandlerInfo readBranchTarget readBranchTarget readBranchTarget $ do 
+                                                                                                                 idx <- readInt16
                                                                                                                  if idx == 0 then return Nothing else return $ Just $ getClassName cp idx
     attrsCount     <- readInt16
     attrs          <- parseAttributes cp attrsCount -- TODO: currently discarded

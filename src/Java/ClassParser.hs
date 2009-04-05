@@ -15,9 +15,6 @@ module Java.ClassParser (
 
 -- TODO move methods and related types to separate module
 
-import Debug.Trace
-
-
 import qualified Java.ClassParser.Class as C
 import Java.ClassParser.Instructions
 import Java.Linker
@@ -61,8 +58,8 @@ loadAndLinkAll files = linkAll (Just rtjar) `liftM` (loadAll files)
 ------------------------------------------------------------------
 
 isSubClassOf :: Class -> Class -> Bool
-isSubClassOf s p | trace "isSubClassOf s p (s == p)" True && clsName s == clsName p = True
-isSubClassOf s p | trace "isSubClassOf s p (otherwise)" True && otherwise = 
+isSubClassOf s p | clsName s == clsName p = True
+isSubClassOf s p | otherwise = 
     case clsSuper s of
         Just c  -> c `isSubClassOf` p 
         Nothing -> False

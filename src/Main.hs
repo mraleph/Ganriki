@@ -18,6 +18,6 @@ main = do
     forM_ methods $ \method -> do             
         putStrLn $ mName method
         case mCode method of
-            Just code -> do putStrLn $ show $ mcCode code
+            Just code -> do putStrLn $ show method
                             putStrLn $ show $ translate ctx code
             Nothing   -> putStrLn "\n(no code)"

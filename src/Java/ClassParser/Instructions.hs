@@ -121,7 +121,7 @@ data VMOp = Nop
 data Bytecode = Bytecode { bcCode :: [VMOp], bcLabels :: [Int] }
 
 instance Show Bytecode where
-    show b = unlines $ zipWith f [1..n] code 
+    show b = unlines $ zipWith f [0..(n-1)] code 
         where code  = bcCode b
               n     = length $ bcCode b
               f i l = ("\t\t" ++ (show i) ++ ": ") ++ (show l)
@@ -136,8 +136,8 @@ type CPGet a = ReaderT St Get a
 
 data VMInstruction = VMInstruction { vmiName :: String, vmiOpcode :: Int, vmiParse :: CPGet VMOp }
 
-parseCode :: ConstantPool -> StrictB.ByteString -> Bytecode 
-parseCode cp code = Bytecode ops []
+parseCode :: ConstantPool -> StrictB.ByteString -> (Bytecode, Int -> Int)
+parseCode cp code = (Bytecode ops [], label)
     where
         (o2i, ops) = fromRight $ fst $ runGet (parseCode' cp label 0) code
         
