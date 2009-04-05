@@ -1,7 +1,10 @@
 {-# LANGUAGE BangPatterns #-}
 
-module Java.ClassParser.Instructions (parseCode, Bytecode) where
-
+module Java.ClassParser.Instructions (
+  parseCode
+, Bytecode, bcCode
+, VMOp(..)
+, VMOperandType (..)) where
 
 import Data.Maybe (fromJust)
 import Control.Monad (ap)
@@ -60,10 +63,10 @@ data ArrayType = ArrayType { atBaseType :: Either VMOperandType String, atDim ::
 --
 data VMOp = Nop
           | Push   { const :: T.Constant }
-          | Load   { optype :: VMOperandType, local :: Int } 
-          | Store  { optype :: VMOperandType, local :: Int }
-          | ALoad  { optype :: VMOperandType }
-          | AStore { optype :: VMOperandType }
+          | Load   { vmopType :: VMOperandType, local :: Int } 
+          | Store  { vmopType :: VMOperandType, local :: Int }
+          | ALoad  { vmopType :: VMOperandType }
+          | AStore { vmopType :: VMOperandType }
           | Pop
           | Pop2
           | Dup
@@ -73,21 +76,21 @@ data VMOp = Nop
           | Dup2X1
           | Dup2X2
           | Swap
-          | Add  { optype :: VMOperandType }
-          | Sub  { optype :: VMOperandType }
-          | Mul  { optype :: VMOperandType }
-          | Div  { optype :: VMOperandType }
-          | Rem  { optype :: VMOperandType }
-          | Neg  { optype :: VMOperandType }
-          | Shl  { optype :: VMOperandType }
-          | Shr  { optype :: VMOperandType }
-          | UShr { optype :: VMOperandType }
-          | And  { optype :: VMOperandType }
-          | Or   { optype :: VMOperandType }
-          | XOr  { optype :: VMOperandType }
+          | Add  { vmopType :: VMOperandType }
+          | Sub  { vmopType :: VMOperandType }
+          | Mul  { vmopType :: VMOperandType }
+          | Div  { vmopType :: VMOperandType }
+          | Rem  { vmopType :: VMOperandType }
+          | Neg  { vmopType :: VMOperandType }
+          | Shl  { vmopType :: VMOperandType }
+          | Shr  { vmopType :: VMOperandType }
+          | UShr { vmopType :: VMOperandType }
+          | And  { vmopType :: VMOperandType }
+          | Or   { vmopType :: VMOperandType }
+          | XOr  { vmopType :: VMOperandType }
           | IInc { local :: Int, inc :: Int }
           | Coerce { fromtype :: VMOperandType, totype :: VMOperandType }
-          | Cmp  { optype :: VMOperandType }
+          | Cmp  { vmopType :: VMOperandType }
           | GotoIf { branchCondition :: BranchCondition, branchTarget :: Int }
           | Goto   { branchTarget :: Int }
           | JSR    { branchTarget :: Int }
@@ -118,7 +121,10 @@ data VMOp = Nop
 data Bytecode = Bytecode { bcCode :: [VMOp], bcLabels :: [Int] }
 
 instance Show Bytecode where
-    show b = unlines $ map (("\t\t" ++) . show) $ bcCode b
+    show b = unlines $ zipWith f [1..n] code 
+        where code  = bcCode b
+              n     = length $ bcCode b
+              f i l = ("\t\t" ++ (show i) ++ ": ") ++ (show l)
 
 data St  = St 
            { stConstantPool :: ConstantPool
@@ -409,10 +415,10 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
 
     ,   VMInstruction "multinewarray" 197 $ liftM2 MultiNew readArrayType (readByte)
 
-    ,   VMInstruction "ifnull"      198 $ (GotoIf Null)    `liftM` readShort
-    ,   VMInstruction "ifnonnull"   199 $ (GotoIf NotNull) `liftM` readShort
-    ,   VMInstruction "goto_w"      200 $ Goto `liftM` readInt
-    ,   VMInstruction "jsr_w"       201 $ JSR  `liftM` readInt] 
+    ,   VMInstruction "ifnull"      198 $ (GotoIf Null)    `liftM` readShortBranchOffset
+    ,   VMInstruction "ifnonnull"   199 $ (GotoIf NotNull) `liftM` readShortBranchOffset
+    ,   VMInstruction "goto_w"      200 $ Goto `liftM` readIntBranchOffset
+    ,   VMInstruction "jsr_w"       201 $ JSR  `liftM` readIntBranchOffset] 
     where        
         fromAType   :: Int -> VMOperandType
         fromAType  4 = TBoolean
@@ -467,10 +473,10 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
         readInt = lift (fromIntegral `liftM` getWord32be)
 
         readSignedShort :: CPGet Int
-        readSignedShort = lift ((fromIntegral . u16_to_s16) `liftM` getWord16be)
+        readSignedShort = fromIntegral `liftM` lift (u16_to_s16 `liftM` getWord16be)
 
         readSignedInt   :: CPGet Int
-        readSignedInt   = lift ((fromIntegral . u32_to_s32) `liftM` getWord32be)
+        readSignedInt   = fromIntegral `liftM` lift (u32_to_s32 `liftM` getWord32be)
 
         u16_to_s16 :: Word16 -> Int16
         u16_to_s16 = fromIntegral

@@ -1,6 +1,11 @@
 {-# LANGUAGE BangPatterns #-}
 
-module Java.ClassParser.Class (Class, parse, clsName, clsSuper, clsIfaces, clsIsInterface) where
+module Java.ClassParser.Class (
+    parse
+    , Class, clsName, clsSuper, clsIfaces, clsIsInterface, clsMethods
+    , Method, mAccess, mName, mSig, mCode
+    , MethodCode, mcMaxStack, mcMaxLocals, mcCode, mcHandlers    
+) where
 
 import qualified Data.ByteString.Lazy as B
 
@@ -33,16 +38,18 @@ bFromString = B.pack   . map (fromIntegral . ord)
 onString :: (String -> String) -> (B.ByteString -> B.ByteString)
 onString f  = bFromString . f . bToString
 
-data Class = Class { clsName        :: JString
-                   , clsSuper       :: String
+
+
+data Class = Class { clsName        :: String
+                   , clsSuper       :: Maybe String
                    , clsIfaces      :: [String]
                    , clsIsInterface :: Bool
                    , clsMethods     :: [Method]
                    }
 
 instance Show Class where
-    show cls | clsIsInterface cls = "interface " ++ (toString $ clsName cls) ++ "\n" ++ (unlines $ map show $ clsMethods cls)
-    show cls | otherwise          = "class "     ++ (toString $ clsName cls) ++ "\n" ++ (unlines $ map show $ clsMethods cls)
+    show cls | clsIsInterface cls = "interface " ++ clsName cls ++ "\n" ++ (unlines $ map show $ clsMethods cls)
+    show cls | otherwise          = "class "     ++ clsName cls ++ "\n" ++ (unlines $ map show $ clsMethods cls)
 
 data Access = Public | Private | Protected | Package deriving (Eq)
 
@@ -67,12 +74,12 @@ data MethodCode = MethodCode {
                   }
 
 
-data Method = Method { mAccess :: Access, mName :: JString, mSig  :: MethodSig, mCode       :: Maybe MethodCode } 
-data Field  = Field  { fAccess :: Access, fName :: JString, fType :: JType, fAttributes :: Attributes } deriving (Show)
+data Method = Method { mAccess :: Access, mName :: String, mSig  :: MethodSig, mCode   :: Maybe MethodCode } 
+data Field  = Field  { fAccess :: Access, fName :: String, fType :: JType, fAttributes :: Attributes } deriving (Show)
 
 instance Show Method where
     --show (Method a n s c) = "\t" ++ (toString n) ++ " " ++ (show s) ++ (maybe " = 0" (("\n" ++) . unlines . (map (("\t\t" ++) . show)) . mcCode) c)
-    show (Method a n s c) = "\t" ++ (toString n) ++ " " ++ (show s) ++ (maybe " = 0" ((("\n" ++) . show) . mcCode) c)
+    show (Method a n s c) = "\t" ++ n ++ " " ++ (show s) ++ (maybe " = 0" ((("\n" ++) . show) . mcCode) c)
 
 type Attributes = M.Map String [Word8]
 
@@ -97,14 +104,14 @@ readInt32 = fromIntegral `liftM` readWord32
 readBytes :: Int -> Get [Word8]
 readBytes n = unpack `liftM` (getBytes n)
 
-mkMethod :: ConstantPool -> Access -> JString -> MethodSig -> Attributes -> Method
+mkMethod :: ConstantPool -> Access -> String -> MethodSig -> Attributes -> Method
 mkMethod cp a n s attrs = 
     Method a n s $
         case M.lookup "Code" attrs of
             Nothing   -> Nothing
             Just code -> Just $ runGet (parseCode cp) (B.pack code)
 
-mkField :: ConstantPool -> Access -> JString -> JType -> Attributes -> Field
+mkField :: ConstantPool -> Access -> String -> JType -> Attributes -> Field
 mkField cp = Field
 
 classFileParser :: Get Class
@@ -114,10 +121,11 @@ classFileParser = do
     cp          <- parseConstantPool $ (fromIntegral cpSize - 1)
     accessFlags <- readWord16
     thisClass   <- readInt16
-    let className      = (cpiName . cpEntry cp) thisClass
+    let className      = (toString . cpiName . cpEntry cp) thisClass
     let access         = flagsToAccess accessFlags
     let iface          = (0 /= accessFlags .&. 0x0200)
-    super       <- (toString . cpiName . cpEntry cp) `liftM` readInt16
+    idxSuper       <- readInt16
+    let super = if idxSuper == 0 then Nothing else Just $ (toString . cpiName . cpEntry cp) idxSuper
     ifCount     <- readInt16
     ifaces      <- replicateM ifCount ((toString . cpiName . cpEntry cp) `liftM` readInt16)
     fieldCount  <- readInt16
@@ -127,7 +135,7 @@ classFileParser = do
     return (Class className super ifaces iface methods)
 
 parseMember :: ConstantPool                                                     ->
-               (ConstantPool -> Access -> JString -> a -> Attributes -> b)      ->
+               (ConstantPool -> Access -> String -> a -> Attributes -> b)      ->
                (JString -> a)                                                   ->
                Get b
 
@@ -139,7 +147,7 @@ parseMember cp ctor parser = do
     attrs       <- parseAttributes cp attrCount
     return $ ctor cp
                   (flagsToAccess accessFlags)
-                  ((cpiStrValue . cpEntry cp) nameIndex)
+                  ((toString . cpiStrValue . cpEntry cp) nameIndex)
                   ((parser . cpiStrValue . cpEntry cp) descrIndex)
                   attrs
 
