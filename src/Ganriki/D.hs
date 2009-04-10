@@ -20,8 +20,6 @@ newtype LIR = Lir (Gr Label ())
 instance Show LIR where
   show (Lir g) = graphviz' g
 
--- Maybe Reader monad?
-
 translate :: LinkageContext -> MethodCode -> LIR
 translate ctx code = Lir $ mkGraph basicBlocks branches
     where    
@@ -133,8 +131,6 @@ opType op = case op of
     isIntegral TLong = True
     isIntegral _       = False
 
-
-
 op2string :: VMOp -> String
 op2string op =
     case op of
@@ -191,3 +187,83 @@ op2string op =
         MultiNew _ _ -> "multinew" 
         LookupSwitch _ _ -> "lookupswitch" 
         TableSwitch _ _ _ _ -> "tableswitch" 
+
+data TranslationContext = Context { stackTop :: Int }
+
+type Translation a = State TranslationContext  
+
+vmop2hop :: VMOp -> Translation HOP
+vmop2hop op =
+    case op of
+        Push _    ->    
+        Load _ _  -> "load"   
+        Store _ _ -> "store"  
+        ALoad _   -> "aload"  
+        AStore _  -> "astore" 
+        Pop       -> "pop"
+        Pop2      -> "pop2"
+        Dup       -> "dup"
+        DupX1     -> "dupx1"
+        DupX2     -> "dupx2"
+        Dup2      -> "dup2"
+        Dup2X1    -> "dup2x1"
+        Dup2X2    -> "dup2x2"
+        Swap      -> "swap"
+        Add _     ->    do i <- pop
+                        j <- pop                       
+                        push $ OAdd i j 
+        Sub _     -> "sub"  
+        Mul _     -> "mul"  
+        Div _     -> "div"  
+        Rem _     -> "rem"  
+        Neg _     -> "neg"  
+        Shl _     -> "shl"  
+        Shr _     -> "shr"  
+        UShr _    -> "ushr" 
+        And _     -> "and"  
+        Or  _ -> "or"   
+        XOr _ -> "xor"  
+        IInc _ _ -> "iinc" 
+        Coerce _ _ -> "coerce" 
+        Cmp _ -> "cmp"    
+        GotoIf _ _ -> "gotoif" 
+        Goto _ -> "goto"   
+        JSR _ -> "jsr"    
+        Ret _ -> "ret"    
+        Return _ -> "return" 
+        GetStatic _ -> "getstatic" 
+        PutStatic _ -> "putstatic" 
+        GetField _ -> "getfield"  
+        PutField _ -> "putfield"  
+        InvokeSpecial _ -> "invokespecial"   
+        InvokeStatic _ -> "invokestatic"    
+        InvokeVirtual _ -> "invokevirtual"   
+        InvokeInterface _ -> "invokeinterface" 
+        New _ -> "new"  
+        ANew _ -> "anew" 
+        ALength -> "alength"
+        Throw -> "throw"
+        CheckCast _ -> "checkcast"   
+        InstanceOf _ -> "instanceof"  
+        MonitorEnter -> "monitorenter"
+        MonitorExit -> "monitorexit"
+        MultiNew _ _ -> "multinew" 
+        LookupSwitch _ _ -> "lookupswitch" 
+        TableSwitch _ _ _ _ -> "tableswitch" 
+
+
+data HOp = Assign Local Local
+         | Phi Local [Locals]
+         | Invoke (Maybe Local) Local Method [Locals]
+         | InvokeStatic (Maybe Local) Method [Locals]
+         | PutField Field Local
+         | GetField Local Field
+         | PutStaticField Field Local
+         | GetStaticField Local Field
+         | Return (Maybe Local)
+         | Throw Local
+
+newtype HIR = HIR (Gr HOp ())
+
+lir2hir :: LIR -> HIR
+lir2hir (Lir l) =         
