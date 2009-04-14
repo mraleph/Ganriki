@@ -4,7 +4,8 @@ module Java.ClassParser.Instructions (
   parseCode
 , Bytecode, bcCode
 , VMOp(..)
-, VMOperandType (..)) where
+, VMOperandType (..)
+, BranchCondition(..)) where
 
 import Data.Maybe (fromJust)
 import Control.Monad (ap)
@@ -26,15 +27,15 @@ import qualified Data.ByteString as StrictB
 import qualified Java.Types as T (toString, Constant(..), JType(..))
 import Java.ClassParser.ConstantPool (ConstantPool, FieldRef, MethodRef, getFieldRef, getMethodRef, getClassName, getJType, cpEntry, ConstantPoolInfo(..), getConstant)
 
-data VMOperandType = TRef                   
-                   | TBoolean
-                   | TByte
-                   | TChar
-                   | TShort         
-                   | TInt
-                   | TLong
-                   | TFloat
-                   | TDouble                  
+data VMOperandType = OpRef                   
+                   | OpBoolean
+                   | OpByte
+                   | OpChar
+                   | OpShort         
+                   | OpInt
+                   | OpLong
+                   | OpFloat
+                   | OpDouble                  
                    deriving (Show)
 
 data BranchCondition = ZEq
@@ -207,77 +208,77 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "ldc_w"        19 $ Push `liftM` (liftM2 getConstant getCP readShort)
     ,   VMInstruction "ldc2_w"       20 $ Push `liftM` (liftM2 getConstant getCP readShort)
 
-    ,   VMInstruction "iload"        21 $ (Load TInt)    `liftM` readByte
-    ,   VMInstruction "lload"        22 $ (Load TLong)   `liftM` readByte
-    ,   VMInstruction "fload"        23 $ (Load TFloat)  `liftM` readByte
-    ,   VMInstruction "dload"        24 $ (Load TDouble) `liftM` readByte
-    ,   VMInstruction "aload"        25 $ (Load TRef)    `liftM` readByte
+    ,   VMInstruction "iload"        21 $ (Load OpInt)    `liftM` readByte
+    ,   VMInstruction "lload"        22 $ (Load OpLong)   `liftM` readByte
+    ,   VMInstruction "fload"        23 $ (Load OpFloat)  `liftM` readByte
+    ,   VMInstruction "dload"        24 $ (Load OpDouble) `liftM` readByte
+    ,   VMInstruction "aload"        25 $ (Load OpRef)    `liftM` readByte
 
-    ,   VMInstruction "iload_0"      26 $ return $ Load TInt 0
-    ,   VMInstruction "iload_1"      27 $ return $ Load TInt 1
-    ,   VMInstruction "iload_2"      28 $ return $ Load TInt 2
-    ,   VMInstruction "iload_3"      29 $ return $ Load TInt 3
-    ,   VMInstruction "lload_0"      30 $ return $ Load TLong 0
-    ,   VMInstruction "lload_1"      31 $ return $ Load TLong 1
-    ,   VMInstruction "lload_2"      32 $ return $ Load TLong 2
-    ,   VMInstruction "lload_3"      33 $ return $ Load TLong 3
-    ,   VMInstruction "fload_0"      34 $ return $ Load TFloat 0
-    ,   VMInstruction "fload_1"      35 $ return $ Load TFloat 1
-    ,   VMInstruction "fload_2"      36 $ return $ Load TFloat 2
-    ,   VMInstruction "fload_3"      37 $ return $ Load TFloat 3
-    ,   VMInstruction "dload_0"      38 $ return $ Load TDouble 0
-    ,   VMInstruction "dload_1"      39 $ return $ Load TDouble 1
-    ,   VMInstruction "dload_2"      40 $ return $ Load TDouble 2
-    ,   VMInstruction "dload_3"      41 $ return $ Load TDouble 3
-    ,   VMInstruction "aload_0"      42 $ return $ Load TRef 0 
-    ,   VMInstruction "aload_1"      43 $ return $ Load TRef 1
-    ,   VMInstruction "aload_2"      44 $ return $ Load TRef 2
-    ,   VMInstruction "aload_3"      45 $ return $ Load TRef 3
+    ,   VMInstruction "iload_0"      26 $ return $ Load OpInt 0
+    ,   VMInstruction "iload_1"      27 $ return $ Load OpInt 1
+    ,   VMInstruction "iload_2"      28 $ return $ Load OpInt 2
+    ,   VMInstruction "iload_3"      29 $ return $ Load OpInt 3
+    ,   VMInstruction "lload_0"      30 $ return $ Load OpLong 0
+    ,   VMInstruction "lload_1"      31 $ return $ Load OpLong 1
+    ,   VMInstruction "lload_2"      32 $ return $ Load OpLong 2
+    ,   VMInstruction "lload_3"      33 $ return $ Load OpLong 3
+    ,   VMInstruction "fload_0"      34 $ return $ Load OpFloat 0
+    ,   VMInstruction "fload_1"      35 $ return $ Load OpFloat 1
+    ,   VMInstruction "fload_2"      36 $ return $ Load OpFloat 2
+    ,   VMInstruction "fload_3"      37 $ return $ Load OpFloat 3
+    ,   VMInstruction "dload_0"      38 $ return $ Load OpDouble 0
+    ,   VMInstruction "dload_1"      39 $ return $ Load OpDouble 1
+    ,   VMInstruction "dload_2"      40 $ return $ Load OpDouble 2
+    ,   VMInstruction "dload_3"      41 $ return $ Load OpDouble 3
+    ,   VMInstruction "aload_0"      42 $ return $ Load OpRef 0 
+    ,   VMInstruction "aload_1"      43 $ return $ Load OpRef 1
+    ,   VMInstruction "aload_2"      44 $ return $ Load OpRef 2
+    ,   VMInstruction "aload_3"      45 $ return $ Load OpRef 3
 
-    ,   VMInstruction "iaload"       46 $ return $ ALoad TInt
-    ,   VMInstruction "laload"       47 $ return $ ALoad TLong
-    ,   VMInstruction "faload"       48 $ return $ ALoad TFloat
-    ,   VMInstruction "daload"       49 $ return $ ALoad TDouble
-    ,   VMInstruction "aaload"       50 $ return $ ALoad TRef
-    ,   VMInstruction "baload"       51 $ return $ ALoad TByte
-    ,   VMInstruction "caload"       52 $ return $ ALoad TChar
-    ,   VMInstruction "saload"       53 $ return $ ALoad TShort
+    ,   VMInstruction "iaload"       46 $ return $ ALoad OpInt
+    ,   VMInstruction "laload"       47 $ return $ ALoad OpLong
+    ,   VMInstruction "faload"       48 $ return $ ALoad OpFloat
+    ,   VMInstruction "daload"       49 $ return $ ALoad OpDouble
+    ,   VMInstruction "aaload"       50 $ return $ ALoad OpRef
+    ,   VMInstruction "baload"       51 $ return $ ALoad OpByte
+    ,   VMInstruction "caload"       52 $ return $ ALoad OpChar
+    ,   VMInstruction "saload"       53 $ return $ ALoad OpShort
 
-    ,   VMInstruction "istore"       54 $ Store TInt    `liftM` readByte
-    ,   VMInstruction "lstore"       55 $ Store TLong   `liftM` readByte
-    ,   VMInstruction "fstore"       56 $ Store TFloat  `liftM` readByte
-    ,   VMInstruction "dstore"       57 $ Store TDouble `liftM` readByte
-    ,   VMInstruction "astore"       58 $ Store TRef    `liftM` readByte
+    ,   VMInstruction "istore"       54 $ Store OpInt    `liftM` readByte
+    ,   VMInstruction "lstore"       55 $ Store OpLong   `liftM` readByte
+    ,   VMInstruction "fstore"       56 $ Store OpFloat  `liftM` readByte
+    ,   VMInstruction "dstore"       57 $ Store OpDouble `liftM` readByte
+    ,   VMInstruction "astore"       58 $ Store OpRef    `liftM` readByte
 
-    ,   VMInstruction "istore_0"     59 $ return $ Store TInt 0
-    ,   VMInstruction "istore_1"     60 $ return $ Store TInt 1
-    ,   VMInstruction "istore_2"     61 $ return $ Store TInt 2
-    ,   VMInstruction "istore_3"     62 $ return $ Store TInt 3
-    ,   VMInstruction "lstore_0"     63 $ return $ Store TLong 0
-    ,   VMInstruction "lstore_1"     64 $ return $ Store TLong 1
-    ,   VMInstruction "lstore_2"     65 $ return $ Store TLong 2
-    ,   VMInstruction "lstore_3"     66 $ return $ Store TLong 3
-    ,   VMInstruction "fstore_0"     67 $ return $ Store TFloat 0
-    ,   VMInstruction "fstore_1"     68 $ return $ Store TFloat 1
-    ,   VMInstruction "fstore_2"     69 $ return $ Store TFloat 2
-    ,   VMInstruction "fstore_3"     70 $ return $ Store TFloat 3
-    ,   VMInstruction "dstore_0"     71 $ return $ Store TDouble 0
-    ,   VMInstruction "dstore_1"     72 $ return $ Store TDouble 1
-    ,   VMInstruction "dstore_2"     73 $ return $ Store TDouble 2
-    ,   VMInstruction "dstore_3"     74 $ return $ Store TDouble 3
-    ,   VMInstruction "astore_0"     75 $ return $ Store TRef 0
-    ,   VMInstruction "astore_1"     76 $ return $ Store TRef 1
-    ,   VMInstruction "astore_2"     77 $ return $ Store TRef 2
-    ,   VMInstruction "astore_3"     78 $ return $ Store TRef 3
+    ,   VMInstruction "istore_0"     59 $ return $ Store OpInt 0
+    ,   VMInstruction "istore_1"     60 $ return $ Store OpInt 1
+    ,   VMInstruction "istore_2"     61 $ return $ Store OpInt 2
+    ,   VMInstruction "istore_3"     62 $ return $ Store OpInt 3
+    ,   VMInstruction "lstore_0"     63 $ return $ Store OpLong 0
+    ,   VMInstruction "lstore_1"     64 $ return $ Store OpLong 1
+    ,   VMInstruction "lstore_2"     65 $ return $ Store OpLong 2
+    ,   VMInstruction "lstore_3"     66 $ return $ Store OpLong 3
+    ,   VMInstruction "fstore_0"     67 $ return $ Store OpFloat 0
+    ,   VMInstruction "fstore_1"     68 $ return $ Store OpFloat 1
+    ,   VMInstruction "fstore_2"     69 $ return $ Store OpFloat 2
+    ,   VMInstruction "fstore_3"     70 $ return $ Store OpFloat 3
+    ,   VMInstruction "dstore_0"     71 $ return $ Store OpDouble 0
+    ,   VMInstruction "dstore_1"     72 $ return $ Store OpDouble 1
+    ,   VMInstruction "dstore_2"     73 $ return $ Store OpDouble 2
+    ,   VMInstruction "dstore_3"     74 $ return $ Store OpDouble 3
+    ,   VMInstruction "astore_0"     75 $ return $ Store OpRef 0
+    ,   VMInstruction "astore_1"     76 $ return $ Store OpRef 1
+    ,   VMInstruction "astore_2"     77 $ return $ Store OpRef 2
+    ,   VMInstruction "astore_3"     78 $ return $ Store OpRef 3
 
-    ,   VMInstruction "iastore"      79 $ return $ AStore TInt
-    ,   VMInstruction "lastore"      80 $ return $ AStore TLong
-    ,   VMInstruction "fastore"      81 $ return $ AStore TFloat
-    ,   VMInstruction "dastore"      82 $ return $ AStore TDouble
-    ,   VMInstruction "aastore"      83 $ return $ AStore TRef
-    ,   VMInstruction "bastore"      84 $ return $ AStore TByte
-    ,   VMInstruction "castore"      85 $ return $ AStore TChar
-    ,   VMInstruction "sastore"      86 $ return $ AStore TShort
+    ,   VMInstruction "iastore"      79 $ return $ AStore OpInt
+    ,   VMInstruction "lastore"      80 $ return $ AStore OpLong
+    ,   VMInstruction "fastore"      81 $ return $ AStore OpFloat
+    ,   VMInstruction "dastore"      82 $ return $ AStore OpDouble
+    ,   VMInstruction "aastore"      83 $ return $ AStore OpRef
+    ,   VMInstruction "bastore"      84 $ return $ AStore OpByte
+    ,   VMInstruction "castore"      85 $ return $ AStore OpChar
+    ,   VMInstruction "sastore"      86 $ return $ AStore OpShort
 
     ,   VMInstruction "pop"          87 $ return Pop
     ,   VMInstruction "pop2"         88 $ return Pop2
@@ -289,74 +290,74 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "dup2_x2"      94 $ return Dup2X2
     ,   VMInstruction "swap"         95 $ return Swap
 
-    ,   VMInstruction "iadd"         96 $ return $ Add TInt
-    ,   VMInstruction "ladd"         97 $ return $ Add TLong
-    ,   VMInstruction "fadd"         98 $ return $ Add TFloat
-    ,   VMInstruction "dadd"         99 $ return $ Add TDouble
+    ,   VMInstruction "iadd"         96 $ return $ Add OpInt
+    ,   VMInstruction "ladd"         97 $ return $ Add OpLong
+    ,   VMInstruction "fadd"         98 $ return $ Add OpFloat
+    ,   VMInstruction "dadd"         99 $ return $ Add OpDouble
 
-    ,   VMInstruction "isub"        100 $ return $ Sub TInt
-    ,   VMInstruction "lsub"        101 $ return $ Sub TLong
-    ,   VMInstruction "fsub"        102 $ return $ Sub TFloat
-    ,   VMInstruction "dsub"        103 $ return $ Sub TDouble
+    ,   VMInstruction "isub"        100 $ return $ Sub OpInt
+    ,   VMInstruction "lsub"        101 $ return $ Sub OpLong
+    ,   VMInstruction "fsub"        102 $ return $ Sub OpFloat
+    ,   VMInstruction "dsub"        103 $ return $ Sub OpDouble
 
-    ,   VMInstruction "imul"        104 $ return $ Mul TInt
-    ,   VMInstruction "lmul"        105 $ return $ Mul TLong
-    ,   VMInstruction "fmul"        106 $ return $ Mul TFloat
-    ,   VMInstruction "dmul"        107 $ return $ Mul TDouble
+    ,   VMInstruction "imul"        104 $ return $ Mul OpInt
+    ,   VMInstruction "lmul"        105 $ return $ Mul OpLong
+    ,   VMInstruction "fmul"        106 $ return $ Mul OpFloat
+    ,   VMInstruction "dmul"        107 $ return $ Mul OpDouble
 
-    ,   VMInstruction "idiv"        108 $ return $ Div TInt
-    ,   VMInstruction "ldiv"        109 $ return $ Div TLong
-    ,   VMInstruction "fdiv"        110 $ return $ Div TFloat
-    ,   VMInstruction "ddiv"        111 $ return $ Div TDouble
+    ,   VMInstruction "idiv"        108 $ return $ Div OpInt
+    ,   VMInstruction "ldiv"        109 $ return $ Div OpLong
+    ,   VMInstruction "fdiv"        110 $ return $ Div OpFloat
+    ,   VMInstruction "ddiv"        111 $ return $ Div OpDouble
 
 
-    ,   VMInstruction "irem"        112 $ return $ Rem TInt
-    ,   VMInstruction "lrem"        113 $ return $ Rem TLong
-    ,   VMInstruction "frem"        114 $ return $ Rem TFloat
-    ,   VMInstruction "drem"        115 $ return $ Rem TDouble
+    ,   VMInstruction "irem"        112 $ return $ Rem OpInt
+    ,   VMInstruction "lrem"        113 $ return $ Rem OpLong
+    ,   VMInstruction "frem"        114 $ return $ Rem OpFloat
+    ,   VMInstruction "drem"        115 $ return $ Rem OpDouble
 
-    ,   VMInstruction "ineg"        116 $ return $ Neg TInt
-    ,   VMInstruction "lneg"        117 $ return $ Neg TLong
-    ,   VMInstruction "fneg"        118 $ return $ Neg TFloat
-    ,   VMInstruction "dneg"        119 $ return $ Neg TDouble
+    ,   VMInstruction "ineg"        116 $ return $ Neg OpInt
+    ,   VMInstruction "lneg"        117 $ return $ Neg OpLong
+    ,   VMInstruction "fneg"        118 $ return $ Neg OpFloat
+    ,   VMInstruction "dneg"        119 $ return $ Neg OpDouble
 
-    ,   VMInstruction "ishl"        120 $ return $ Shl TInt
-    ,   VMInstruction "lshl"        121 $ return $ Shl TLong
-    ,   VMInstruction "ishr"        122 $ return $ Shr TInt
-    ,   VMInstruction "lshr"        123 $ return $ Shr TLong
-    ,   VMInstruction "iushr"       124 $ return $ UShr TInt
-    ,   VMInstruction "lushr"       125 $ return $ UShr TLong
-    ,   VMInstruction "iand"        126 $ return $ And TInt
-    ,   VMInstruction "land"        127 $ return $ And TLong
-    ,   VMInstruction "ior"         128 $ return $ Or TInt
-    ,   VMInstruction "lor"         129 $ return $ Or TLong
-    ,   VMInstruction "ixor"        130 $ return $ XOr TInt
-    ,   VMInstruction "lxor"        131 $ return $ XOr TLong
+    ,   VMInstruction "ishl"        120 $ return $ Shl OpInt
+    ,   VMInstruction "lshl"        121 $ return $ Shl OpLong
+    ,   VMInstruction "ishr"        122 $ return $ Shr OpInt
+    ,   VMInstruction "lshr"        123 $ return $ Shr OpLong
+    ,   VMInstruction "iushr"       124 $ return $ UShr OpInt
+    ,   VMInstruction "lushr"       125 $ return $ UShr OpLong
+    ,   VMInstruction "iand"        126 $ return $ And OpInt
+    ,   VMInstruction "land"        127 $ return $ And OpLong
+    ,   VMInstruction "ior"         128 $ return $ Or OpInt
+    ,   VMInstruction "lor"         129 $ return $ Or OpLong
+    ,   VMInstruction "ixor"        130 $ return $ XOr OpInt
+    ,   VMInstruction "lxor"        131 $ return $ XOr OpLong
 
     ,   VMInstruction "iinc"        132 $ liftM2 IInc readByte readByte
 
-    ,   VMInstruction "i2l"         133 $ return $ Coerce TInt TLong  
-    ,   VMInstruction "i2f"         134 $ return $ Coerce TInt TFloat  
-    ,   VMInstruction "i2d"         135 $ return $ Coerce TInt TDouble 
-    ,   VMInstruction "l2i"         136 $ return $ Coerce TLong TInt
-    ,   VMInstruction "l2f"         137 $ return $ Coerce TLong TFloat
-    ,   VMInstruction "l2d"         138 $ return $ Coerce TLong TDouble
-    ,   VMInstruction "f2i"         139 $ return $ Coerce TFloat TInt
-    ,   VMInstruction "f2l"         140 $ return $ Coerce TFloat TLong
-    ,   VMInstruction "f2d"         141 $ return $ Coerce TFloat TDouble
-    ,   VMInstruction "d2i"         142 $ return $ Coerce TDouble TInt
-    ,   VMInstruction "d2l"         143 $ return $ Coerce TDouble TLong
-    ,   VMInstruction "d2f"         144 $ return $ Coerce TDouble TFloat
-    ,   VMInstruction "i2b"         145 $ return $ Coerce TInt TByte
-    ,   VMInstruction "i2c"         146 $ return $ Coerce TInt TChar
-    ,   VMInstruction "i2s"         147 $ return $ Coerce TInt TShort
+    ,   VMInstruction "i2l"         133 $ return $ Coerce OpInt OpLong  
+    ,   VMInstruction "i2f"         134 $ return $ Coerce OpInt OpFloat  
+    ,   VMInstruction "i2d"         135 $ return $ Coerce OpInt OpDouble 
+    ,   VMInstruction "l2i"         136 $ return $ Coerce OpLong OpInt
+    ,   VMInstruction "l2f"         137 $ return $ Coerce OpLong OpFloat
+    ,   VMInstruction "l2d"         138 $ return $ Coerce OpLong OpDouble
+    ,   VMInstruction "f2i"         139 $ return $ Coerce OpFloat OpInt
+    ,   VMInstruction "f2l"         140 $ return $ Coerce OpFloat OpLong
+    ,   VMInstruction "f2d"         141 $ return $ Coerce OpFloat OpDouble
+    ,   VMInstruction "d2i"         142 $ return $ Coerce OpDouble OpInt
+    ,   VMInstruction "d2l"         143 $ return $ Coerce OpDouble OpLong
+    ,   VMInstruction "d2f"         144 $ return $ Coerce OpDouble OpFloat
+    ,   VMInstruction "i2b"         145 $ return $ Coerce OpInt OpByte
+    ,   VMInstruction "i2c"         146 $ return $ Coerce OpInt OpChar
+    ,   VMInstruction "i2s"         147 $ return $ Coerce OpInt OpShort
 
 
-    ,   VMInstruction "lcmp"        148 $ return $ Cmp TLong
-    ,   VMInstruction "fcmpl"       149 $ return $ Cmp TFloat   -- todo: g/l difference
-    ,   VMInstruction "fcmpg"       150 $ return $ Cmp TFloat   -- todo: g/l difference
-    ,   VMInstruction "dcmpl"       151 $ return $ Cmp TDouble  -- todo: g/l difference
-    ,   VMInstruction "dcmpg"       152 $ return $ Cmp TDouble  -- todo: g/l difference
+    ,   VMInstruction "lcmp"        148 $ return $ Cmp OpLong
+    ,   VMInstruction "fcmpl"       149 $ return $ Cmp OpFloat   -- todo: g/l difference
+    ,   VMInstruction "fcmpg"       150 $ return $ Cmp OpFloat   -- todo: g/l difference
+    ,   VMInstruction "dcmpl"       151 $ return $ Cmp OpDouble  -- todo: g/l difference
+    ,   VMInstruction "dcmpg"       152 $ return $ Cmp OpDouble  -- todo: g/l difference
 
     ,   VMInstruction "ifeq"        153 $ GotoIf ZEq   `liftM` readShortBranchOffset
     ,   VMInstruction "ifne"        154 $ GotoIf ZNe   `liftM` readShortBranchOffset
@@ -379,11 +380,11 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "tableswitch"  170 $ tableswitch
     ,   VMInstruction "lookupswitch" 171 $ lookupswitch
 
-    ,   VMInstruction "ireturn"     172 $ return $ Return $ Just TInt
-    ,   VMInstruction "lreturn"     173 $ return $ Return $ Just TLong
-    ,   VMInstruction "freturn"     174 $ return $ Return $ Just TFloat
-    ,   VMInstruction "dreturn"     175 $ return $ Return $ Just TDouble
-    ,   VMInstruction "areturn"     176 $ return $ Return $ Just TRef
+    ,   VMInstruction "ireturn"     172 $ return $ Return $ Just OpInt
+    ,   VMInstruction "lreturn"     173 $ return $ Return $ Just OpLong
+    ,   VMInstruction "freturn"     174 $ return $ Return $ Just OpFloat
+    ,   VMInstruction "dreturn"     175 $ return $ Return $ Just OpDouble
+    ,   VMInstruction "areturn"     176 $ return $ Return $ Just OpRef
     ,   VMInstruction "return"      177 $ return $ Return $ Nothing
 
     ,   VMInstruction "getstatic"   178 $ GetStatic `liftM` readFieldRef
@@ -421,14 +422,14 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
     ,   VMInstruction "jsr_w"       201 $ JSR  `liftM` readIntBranchOffset] 
     where        
         fromAType   :: Int -> VMOperandType
-        fromAType  4 = TBoolean
-        fromAType  5 = TChar 
-        fromAType  6 = TFloat
-        fromAType  7 = TDouble
-        fromAType  8 = TByte
-        fromAType  9 = TShort
-        fromAType 10 = TInt
-        fromAType 11 = TLong
+        fromAType  4 = OpBoolean
+        fromAType  5 = OpChar 
+        fromAType  6 = OpFloat
+        fromAType  7 = OpDouble
+        fromAType  8 = OpByte
+        fromAType  9 = OpShort
+        fromAType 10 = OpInt
+        fromAType 11 = OpLong
         fromAType  i = error $ "invalid array type " ++ show i
 
         getArrayType :: ConstantPool -> Int -> ArrayType
@@ -453,14 +454,14 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
         jtype2arraytype (T.TArray b) = case b of 
                                            T.TArray _    -> second (+1) $ jtype2arraytype b
                                            T.TInstance i -> (Right i, 0)
-                                           T.TByte       -> (Left TByte, 0)
-                                           T.TChar       -> (Left TChar, 0)
-                                           T.TDouble     -> (Left TDouble, 0)
-                                           T.TFloat      -> (Left TFloat, 0)
-                                           T.TInt        -> (Left TInt, 0)
-                                           T.TLong       -> (Left TLong, 0)
-                                           T.TShort      -> (Left TShort, 0)
-                                           T.TBoolean    -> (Left TBoolean, 0)
+                                           T.TByte       -> (Left OpByte, 0)
+                                           T.TChar       -> (Left OpChar, 0)
+                                           T.TDouble     -> (Left OpDouble, 0)
+                                           T.TFloat      -> (Left OpFloat, 0)
+                                           T.TInt        -> (Left OpInt, 0)
+                                           T.TLong       -> (Left OpLong, 0)
+                                           T.TShort      -> (Left OpShort, 0)
+                                           T.TBoolean    -> (Left OpBoolean, 0)
 
 
         readByte :: Integral a => CPGet a
@@ -514,17 +515,17 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
             opcode <- readByte
             case opcode of 
                 -- iload, lload, fload, dload, aload    
-                21 -> Load TInt    `liftM` readShort
-                22 -> Load TLong   `liftM` readShort
-                23 -> Load TFloat  `liftM` readShort
-                24 -> Load TDouble `liftM` readShort
-                25 -> Load TRef    `liftM` readShort
+                21 -> Load OpInt    `liftM` readShort
+                22 -> Load OpLong   `liftM` readShort
+                23 -> Load OpFloat  `liftM` readShort
+                24 -> Load OpDouble `liftM` readShort
+                25 -> Load OpRef    `liftM` readShort
                 -- istore, lstore, fstore, dstore, astore
-                54 -> Store TInt    `liftM` readShort
-                55 -> Store TLong   `liftM` readShort
-                56 -> Store TFloat  `liftM` readShort
-                57 -> Store TDouble `liftM` readShort
-                58 -> Store TRef    `liftM` readShort
+                54 -> Store OpInt    `liftM` readShort
+                55 -> Store OpLong   `liftM` readShort
+                56 -> Store OpFloat  `liftM` readShort
+                57 -> Store OpDouble `liftM` readShort
+                58 -> Store OpRef    `liftM` readShort
                 -- ret
                 169 -> Ret `liftM` readShort
                 -- iinc

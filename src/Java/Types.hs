@@ -90,9 +90,9 @@ readJFloat = do
     return $ JFloat $ bits2float $ fromIntegral bits
     where bits2float :: Int32 -> Float
           bits2float bits | bits == 0x7f800000 = 1/0
-          bits2float bits | bits == 0xff800000 = -1/0
-          bits2float bits | ((0x7f800001 <= bits) && (bits <= 0x7fffffff)) || ((0xff800001 <= bits) && (bits <= 0xffffffff)) = 0/0
-          bits2float bits | otherwise = let s :: Int32 = if (bits `shiftR` 31) == 0 then 1 else -1
+                          | bits == 0xff800000 = -1/0
+                          | ((0x7f800001 <= bits) && (bits <= 0x7fffffff)) || ((0xff800001 <= bits) && (bits <= 0xffffffff)) = 0/0
+                          | otherwise = let s :: Int32 = if (bits `shiftR` 31) == 0 then 1 else -1
                                             e :: Int32 = (bits `shiftR` 23) .&. 0xff
                                             m :: Int32 = if e == 0 then (bits .&. 0x7fffff) `shiftL` 1 else (bits .&. 0x7fffff) .|. 0x800000
                                         in encodeFloat (fromIntegral $ s * m) (fromIntegral $ e - 150)
@@ -106,9 +106,9 @@ readJDouble = do
     return $ JDouble $ bits2double $ fromIntegral bits
     where bits2double :: Int64 -> Double
           bits2double bits | bits == 0x7ff0000000000000 = 1/0
-          bits2double bits | bits == 0xfff0000000000000 = -1/0
-          bits2double bits | ((0x7ff0000000000001 <= bits) && (bits <= 0x7fffffffffffffff)) || ((0xfff0000000000001 <= bits) && (bits <= 0xffffffffffffffff)) = 0/0
-          bits2double bits | otherwise = let s :: Int64 = if (bits `shiftR` 63) == 0 then 1 else -1
+                           | bits == 0xfff0000000000000 = -1/0
+                           | ((0x7ff0000000000001 <= bits) && (bits <= 0x7fffffffffffffff)) || ((0xfff0000000000001 <= bits) && (bits <= 0xffffffffffffffff)) = 0/0
+                           | otherwise = let s :: Int64 = if (bits `shiftR` 63) == 0 then 1 else -1
                                              e :: Int64 = (bits `shiftR` 52) .&. 0x7ff
                                              m :: Int64 = if e == 0 then (bits .&. 0xfffffffffffff) `shiftL` 1 else (bits .&. 0xfffffffffffff) .|.  0x10000000000000
                                          in encodeFloat (fromIntegral $ s * m) (fromIntegral $ e - 1075)
@@ -129,6 +129,9 @@ instance ConstantValue JString where
 
 instance ConstantValue JInt where
     toConstant (JInt i) = CInt i
+
+instance ConstantValue Int where
+    toConstant i = CInt $ fromIntegral i
 
 instance ConstantValue JFloat where
     toConstant (JFloat f) = CFloat f

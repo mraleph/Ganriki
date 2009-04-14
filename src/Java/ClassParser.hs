@@ -3,19 +3,25 @@ module Java.ClassParser (
     , Class, clsName, clsSuper, clsIfaces, clsIsInterface, clsMethods
     , C.Method, C.mAccess, C.mName, C.mSig, C.mCode
     , C.MethodCode, C.mcMaxStack, C.mcMaxLocals, C.mcCode, C.mcHandlers
-    , C.ExceptionHandlerInfo, C.ehiStartPC, C.ehiEndPC, C.ehiHandlerPC, C.ehiCatch
-    , VMOp(..), VMOperandType (..), bcCode
+    , C.ExceptionHandlerInfo (..)
+    , VMOp(..), VMOperandType (..), bcCode, BranchCondition(..)
     -- platform classes
     , java_lang_ArrayIndexOutOfBoundsException, java_lang_NullPointerException, java_lang_Throwable
     , java_lang_ArithmeticException, java_lang_IncompatibleClassChangeError, java_lang_InstantiationError
     , java_lang_NegativeArraySizeException, java_lang_ClassCastException, java_lang_IllegalMonitorStateException, java_lang_NoSuchMethodError
     , java_lang_NoSuchFieldError, java_lang_LinkageError, java_lang_AbstractMethodError, java_lang_IllegalAccessError, java_lang_ClassLoader
     , LinkageContext, isSubClassOf, loadAndLinkAll, allClasses, resolve, tryResolve
+    , CP.MethodRef, CP.mrClass, CP.mrName, CP.mrSig
+    , CP.FieldRef, CP.frClass, CP.frName, CP.frType
+    , CP.msParams, CP.msRetval
+    , T.Constant (..), T.ConstantValue (..), T.JType (..)    
 ) where
 
 -- TODO move methods and related types to separate module
-
+import qualified Java.Types as T
 import qualified Java.ClassParser.Class as C
+import qualified Java.ClassParser.ConstantPool as CP
+
 import Java.ClassParser.Instructions
 import Java.Linker
 
@@ -59,10 +65,9 @@ loadAndLinkAll files = linkAll (Just rtjar) `liftM` (loadAll files)
 
 isSubClassOf :: Class -> Class -> Bool
 isSubClassOf s p | clsName s == clsName p = True
-isSubClassOf s p | otherwise = 
-    case clsSuper s of
-        Just c  -> c `isSubClassOf` p 
-        Nothing -> False
+                 | otherwise              = case clsSuper s of
+                                                Just c  -> c `isSubClassOf` p 
+                                                Nothing -> False
 
 ------------------------------------------------------------------
 

@@ -5,7 +5,7 @@ module Java.ClassParser.Class (
     , Class, clsName, clsSuper, clsIfaces, clsIsInterface, clsMethods
     , Method, mAccess, mName, mSig, mCode
     , MethodCode, mcMaxStack, mcMaxLocals, mcCode, mcHandlers    
-    , ExceptionHandlerInfo, ehiStartPC, ehiEndPC, ehiHandlerPC, ehiCatch
+    , ExceptionHandlerInfo (..)
 ) where
 
 import qualified Data.ByteString.Lazy as B
@@ -50,7 +50,7 @@ data Class = Class { clsName        :: String
 
 instance Show Class where
     show cls | clsIsInterface cls = "interface " ++ clsName cls ++ "\n" ++ (unlines $ map show $ clsMethods cls)
-    show cls | otherwise          = "class "     ++ clsName cls ++ "\n" ++ (unlines $ map show $ clsMethods cls)
+             | otherwise          = "class "     ++ clsName cls ++ "\n" ++ (unlines $ map show $ clsMethods cls)
 
 data Access = Public | Private | Protected | Package deriving (Eq)
 

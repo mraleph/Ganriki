@@ -171,7 +171,7 @@ findEnd h = allocaArray szCentralDirectoryEnd $ \p -> do
                 Nothing  -> do hSeek h AbsoluteSeek (pos-1)
                                findEndRec h p (pos-1) (left+1)
 
-        findEndRec _ _ _ _        | otherwise = error "Failed to find CentralDirectoryEnd"
+                                  | otherwise = error "Failed to find CentralDirectoryEnd"
          
               
 
