@@ -5,7 +5,10 @@ module Java.ClassParser.Instructions (
 , Bytecode, bcCode
 , VMOp(..)
 , VMOperandType (..)
-, BranchCondition(..)) where
+, BranchCondition(..)
+, ArrayType, ArrayBaseType) where
+
+import Util.QObject
 
 import Data.Maybe (fromJust)
 import Control.Monad (ap)
@@ -56,12 +59,34 @@ data BranchCondition = ZEq
                      | NotNull
                      deriving (Show)
 
-data ArrayType = ArrayType { atBaseType :: Either VMOperandType String, atDim :: Int } deriving (Show)
+newtype ArrayBaseType = ArrayBaseType { abType :: Either VMOperandType String } deriving (Show)
 
---
--- TODO [!!] it looks like branchTargets are byte offsets, not indexes, so invent a way to convert them
--- Maybe use some self-ref trick again?
---
+
+
+data ArrayType = ArrayType { atBaseType :: ArrayBaseType, atDim :: Int } deriving (Show)
+
+instance QObject ArrayBaseType where
+    render t = 
+        case abType t of 
+            Left t  -> render t
+            Right s -> s
+
+instance QObject ArrayType where
+    render (ArrayType base dims) =  (render base) ++ (concat $ replicate dims "[]")
+
+instance QObject VMOperandType where
+    render t =
+        case t of
+            OpRef     -> "ref"
+            OpBoolean -> "boolean"
+            OpByte    -> "byte"
+            OpChar    -> "char"
+            OpShort   -> "short"
+            OpInt     -> "int"
+            OpLong    -> "long"
+            OpFloat   -> "float"
+            OpDouble  -> "double"
+
 data VMOp = Nop
           | Push   { const :: T.Constant }
           | Load   { vmopType :: VMOperandType, local :: Int } 
@@ -106,7 +131,7 @@ data VMOp = Nop
           | InvokeVirtual   { methodref :: MethodRef }
           | InvokeInterface { methodref :: MethodRef }
           | New  { classref :: String }
-          | ANew { basetype :: Either VMOperandType String }
+          | ANew { basetype :: ArrayBaseType }
           | ALength
           | Throw
           | CheckCast   { classref :: String } -- TODO [!!] arrays can come here to
@@ -400,8 +425,8 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
 
     ,   VMInstruction "new"           187 $ New `liftM` readClassName
 
-    ,   VMInstruction "newarray"      188 $ (ANew . Left  . fromAType)    `liftM` readByte
-    ,   VMInstruction "anewarray"     189 $ (ANew . Right) `liftM` readClassName
+    ,   VMInstruction "newarray"      188 $ (ANew . ArrayBaseType . Left  . fromAType)    `liftM` readByte
+    ,   VMInstruction "anewarray"     189 $ (ANew . ArrayBaseType . Right) `liftM` readClassName
 
     ,   VMInstruction "arraylength"   190 $ return ALength
     ,   VMInstruction "athrow"        191 $ return Throw
@@ -450,18 +475,18 @@ instructionSet = array (0, 255) $ map (\x -> (vmiOpcode x, x)) [
             
 
 
-        jtype2arraytype :: T.JType -> (Either VMOperandType String, Int)
+        jtype2arraytype :: T.JType -> (ArrayBaseType, Int)
         jtype2arraytype (T.TArray b) = case b of 
                                            T.TArray _    -> second (+1) $ jtype2arraytype b
-                                           T.TInstance i -> (Right i, 0)
-                                           T.TByte       -> (Left OpByte, 0)
-                                           T.TChar       -> (Left OpChar, 0)
-                                           T.TDouble     -> (Left OpDouble, 0)
-                                           T.TFloat      -> (Left OpFloat, 0)
-                                           T.TInt        -> (Left OpInt, 0)
-                                           T.TLong       -> (Left OpLong, 0)
-                                           T.TShort      -> (Left OpShort, 0)
-                                           T.TBoolean    -> (Left OpBoolean, 0)
+                                           T.TInstance i -> (ArrayBaseType $ Right i, 0)
+                                           T.TByte       -> (ArrayBaseType $ Left OpByte, 0)
+                                           T.TChar       -> (ArrayBaseType $ Left OpChar, 0)
+                                           T.TDouble     -> (ArrayBaseType $ Left OpDouble, 0)
+                                           T.TFloat      -> (ArrayBaseType $ Left OpFloat, 0)
+                                           T.TInt        -> (ArrayBaseType $ Left OpInt, 0)
+                                           T.TLong       -> (ArrayBaseType $ Left OpLong, 0)
+                                           T.TShort      -> (ArrayBaseType $ Left OpShort, 0)
+                                           T.TBoolean    -> (ArrayBaseType $ Left OpBoolean, 0)
 
 
         readByte :: Integral a => CPGet a

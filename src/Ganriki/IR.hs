@@ -3,11 +3,16 @@ module Ganriki.IR (Op (..), IR(..), translate) where
 
 import Control.Arrow (second)
 
+import Util.QObject
+
 import Data.Sequence ((|>))
 import qualified Data.Sequence as S
 
 import qualified Ganriki.VMControlFlow as VMControlFlow
 
+import Ganriki.GDL (toGDL)
+
+import Data.Int (Int32)
 import Data.Maybe (isJust, fromJust)
 import Data.List (find, nub, sort, sortBy, mapAccumL, intercalate)
 import Data.Foldable (toList)
@@ -18,6 +23,7 @@ import qualified Data.Map as M
 import qualified Java.ClassParser as J
 
 import Data.Graph.Inductive (Gr, Node, suc, labNodes, labEdges, gmap, mkGraph, pre)
+import qualified Data.Graph.Inductive as G
 import Data.Graph.Inductive.Query.Dominators
 
 import Control.Monad.State
@@ -61,7 +67,8 @@ data Op  = Load !Local J.Constant
          | Coerce !Local !J.VMOperandType !J.VMOperandType !Local
          | Cmp !Local !Local !Local
          | New !Local ClassRef
-         | ANew !Local (Either J.VMOperandType ClassRef) !Local
+         | MultiNew !Local !J.ArrayType ![Local]          
+         | ANew !Local !J.ArrayBaseType !Local
          | ALength !Local !Local
          | CheckCast !Local !ClassRef
          | InstanceOf !Local !Local !ClassRef
@@ -69,6 +76,7 @@ data Op  = Load !Local J.Constant
          | MonitorExit !Local
          | GotoIf BranchCondition !Local !Local Int
          | Goto Int
+         | LookupSwitch !Local [(Int32, Int)] Int         
 
 newtype BasicBlock = BB { fromBB :: [Op] }
 
@@ -77,6 +85,9 @@ instance Show BasicBlock where
 
 type CFG = Gr BasicBlock ()
 data IR  = IR { irCFG :: CFG, irNLocals :: Int } deriving (Show)
+
+fromJust' s Nothing  = error s
+fromJust' s (Just x) =  x
 
 -------------------------------------------------------------------------------
 -- Translation to IR
@@ -103,11 +114,11 @@ translate m = toSSA ir
 translate'' :: J.MethodCode -> ([Op], Labeler)
 translate'' m = (ops', label)
   where 
-      ops       = J.bcCode $ J.mcCode m
+      ops       = J.mcCode m
       maxLocals = J.mcMaxLocals m
 
       (ops', labels) = translate' m label [(0, maxLocals)] M.empty
-      label i   = fromJust $ M.lookup i labels
+      label i   = fromJust' "label" $ M.lookup i labels
 
 getOffset :: Translation Int
 getOffset = (S.length . tcOps) `liftM` get
@@ -245,6 +256,11 @@ translateOp op =
                            x     <- push J.OpRef
                            emit $ ANew x clazz count
 
+        J.MultiNew t dims  -> do counts <- replicateM dims (pop J.OpInt)
+                                 x      <- push J.OpRef
+                                 emit $ MultiNew x t (reverse counts)
+
+
         J.ALength    -> do arrayref <- pop J.OpRef                         
                            res      <- push J.OpInt
                            emit $ ALength res arrayref
@@ -259,17 +275,25 @@ translateOp op =
                                  res <- push J.OpBoolean
                                  emit $ InstanceOf res obj clazz
 
-        J.MonitorEnter -> do obj <- pop $ J.OpRef
+        J.MonitorEnter -> do obj <- pop J.OpRef
                              emit $ MonitorEnter obj                           
         
-        J.MonitorExit -> do obj <- pop $ J.OpRef
+        J.MonitorExit -> do obj <- pop J.OpRef
                             emit $ MonitorExit obj                           
         
-        J.MultiNew _ _     -> error "MultiNew translation not supported"
         
-        J.LookupSwitch _ _ -> error "LookupSwitch translation not supported"
+        J.LookupSwitch tbl def -> do key  <- pop $ J.OpInt
+                                     tbl' <- fixtable tbl
+                                     def'  <- label def
+                                     emit $ LookupSwitch key tbl' def'
                 
-        J.TableSwitch _ _ _ _ -> error "TableSwitch translation not supported" 
+        J.TableSwitch low high tbl def  -> do key  <- pop $ J.OpInt
+                                              tbl' <- fixtable $ zip [low..high] tbl
+                                              def' <- label def
+                                              emit $ LookupSwitch key tbl' def'
+    where
+        fixtable tbl = mapM (\(k, trg) -> label trg >>= \trg' -> return (k, trg')) tbl
+            
 
 sizeof :: J.VMOperandType -> Int
 sizeof t = 
@@ -350,7 +374,7 @@ nargs ==> after = do
         source v ass = 
             case find ((v == ). snd) ass of
                 Nothing -> v -- value was not corrupted
-                Just _  -> fromJust $ lookup v ass  -- value is corrupted, find copy
+                Just _  -> fromJust' "copy of value" $ lookup v ass  -- value is corrupted, find copy
 
 unop :: J.VMOperandType -> J.VMOperandType -> (Local -> Local -> Op) -> Translation ()
 unop ta tres ctor = do
@@ -461,8 +485,9 @@ toGraph ehi ops = mkGraph basicblocks branches
 targets :: [J.ExceptionHandlerInfo] -> PC -> Op -> [PC]
 targets ehi pc op =
     case op of        
-        Goto pc'           -> [pc']
-        GotoIf _ _ _ pc'   -> [pc', pc+1]        
+        Goto pc'               -> [pc']
+        GotoIf _ _ _ pc'       -> [pc', pc+1]        
+        LookupSwitch _ tbl def -> def:(map snd tbl)
 
         Invoke _ _ _ _     -> (pc+1):handlers
         InvokeStatic _ _ _ -> (pc+1):handlers
@@ -475,6 +500,7 @@ targets ehi pc op =
         Div  _ _ _         -> (pc+1):handlers
         Rem  _ _ _         -> (pc+1):handlers
         New _ _            -> (pc+1):handlers
+        MultiNew _ _ _     -> (pc+1):handlers
         ANew _ _ _         -> (pc+1):handlers
         ALength _ _        -> (pc+1):handlers
         CheckCast _ _      -> (pc+1):handlers
@@ -508,29 +534,36 @@ type Renaming a = State RenamingState a
 toSSA :: IR -> IR
 toSSA ir = ir'
     where 
-        g = irCFG ir 
+        g = irCFG ir
 
         idoms = iDom g 0
 
         nodes = labNodes g
 
-        idom :: Node -> Node
-        idom x = fromJust $ lookup x idoms
+        idom :: Node -> Node -> Bool
+        idom x y = {-# SCC "idom" #-}
+            case lookup y idoms of
+                Nothing -> False
+                Just x' -> x == x'
+
+        childrens :: M.Map Node [Node]
+        childrens = M.fromList $ map (\x -> (x, children' x)) (G.nodes g)
+            where children' x = (map fst $ filter (\(y, x') -> x' == x) idoms)
 
         children :: Node -> [Node]
-        children x = map fst $ filter (\(y, x') -> x' == x) idoms
+        children x = {-# SCC "children" #-} fromJust $ M.lookup x childrens -- map fst $ filter (\(y, x') -> x' == x) idoms
 
         df :: Node -> [Node]
-        df x = nub (filter (\y -> idom y /= x) (suc g x) ++ concatMap (\z -> filter (\y -> idom y /= x) (df z)) (children x))
+        df x = {-# SCC "df" #-} nub (filter (not . (x `idom`)) (suc g x) ++ concatMap (\z -> filter (not . (x `idom`)) (df z)) (children x))
 
         fixpoint :: NodeSet -> (NodeSet -> NodeSet) -> NodeSet
-        fixpoint x f = let x' = (f x) in if x' /= x then fixpoint x' f else x'
+        fixpoint x f = {-# SCC "df" #-} let x' = (f x) in if x' /= x then fixpoint x' f else x'
 
         df0 :: NodeSet -> NodeSet
-        df0 s = Set.fold (\x s' -> (Set.fromList $ df x) `Set.union` s') Set.empty s
+        df0 s = {-# SCC "df0" #-} Set.fold (\x s' -> (Set.fromList $ df x) `Set.union` s') Set.empty s
 
         idf :: NodeSet -> NodeSet
-        idf s = fixpoint (df0 s) (\s' -> df0 (s `Set.union` s'))
+        idf s = {-# SCC "idf" #-} fixpoint (df0 s) (\s' -> df0 (s `Set.union` s'))
 
         assignments :: Local -> NodeSet
         assignments l = Set.fromList $ map fst $ filter (\(_, BB ops) -> (isAssignmentTo l) `any` ops) nodes
@@ -540,7 +573,7 @@ toSSA ir = ir'
 
         allPhies = map (\l -> (l, phies l)) [0 .. (irNLocals ir)]
 
-        phiesIn n = map fst $ filter (\(_, phs) -> n `Set.member` phs) allPhies
+        phiesIn n = {-# SCC "phiesIn" #-} map fst $ filter (\(_, phs) -> n `Set.member` phs) allPhies
 
         -- g'  = gmap (\(preds, n, BB ops, succs) -> (preds, n, BB $ (phiesForNode (length $ pre g n) n) ++ ops, succs)) g
 
@@ -564,7 +597,7 @@ toSSA ir = ir'
                 Just phies -> (n, BB $ (map mkPhie phies) ++ ops)
             where
                 mkPhie (l, l') = Phi l' (map (which l) $ sort $ pre g n)
-                which l n      = fromJust $ M.lookup l (fromJust $ lookup n (rsActiveMaps rs))
+                which l n      = fromJust' "which-1" $ M.lookup l (fromJust' "which-2" $ lookup n (rsActiveMaps rs))
 
         
         getBlock n = fromBB $ fromJust $ lookup n nodes
@@ -632,12 +665,14 @@ toSSA ir = ir'
                 Neg  l x                      -> liftM2 (\x' l'          -> Neg l' x')                      (active x) (version l)
                 Coerce l f t x                -> liftM2 (\x' l'          -> Coerce l' f t x')               (active x) (version l)
                 New l clazz                   -> liftM  (\l'             -> New l' clazz)                   (version l)
+                MultiNew l t counts           -> liftM2 (\counts' l'     -> MultiNew l' t counts')          (mapM active counts) (version l)
                 ANew l t cnt                  -> liftM2 (\cnt' l'        -> ANew l' t cnt')                 (active cnt) (version l)
                 ALength l arr                 -> liftM2 (\arr' l'        -> ALength l' arr')                (active arr) (version l)
                 CheckCast l clazz             -> liftM  (\l'             -> CheckCast l' clazz)             (active l)
                 InstanceOf l obj clazz        -> liftM2 (\l' obj'        -> InstanceOf l' obj' clazz)       (active obj) (version l)
                 MonitorEnter l                -> liftM  (\l'             -> MonitorEnter l')                (active l)
                 MonitorExit l                 -> liftM  (\l'             -> MonitorExit l')                 (active l)
+                LookupSwitch l tbl def        -> liftM  (\l'             -> LookupSwitch l' tbl def)        (active l)
                 Add  l x y                    -> binop' Add  l x y
                 Sub  l x y                    -> binop' Sub  l x y
                 Mul  l x y                    -> binop' Mul  l x y
@@ -652,6 +687,7 @@ toSSA ir = ir'
                 Cmp l x y                     -> binop' Cmp  l x y
                 
                 Phi l args                    -> error "Got Phi() in non SSA IR"
+
                 _                             -> return op
             where 
                 binop' ctor l x y = liftM3 (\x' y' l' -> ctor l' x' y') (active x) (active y) (version l)
@@ -682,6 +718,7 @@ toSSA ir = ir'
                 Coerce l' _ _ _ -> l' == l
                 Cmp l' _ _ -> l' == l
                 New l' _ -> l' == l
+                MultiNew l' _ _ -> l' == l
                 ANew l' _ _ -> l' == l
                 ALength l' _ -> l' == l
                 CheckCast l' _ -> l' == l
@@ -690,13 +727,7 @@ toSSA ir = ir'
 
 -------------------------------------------------------------------------------------------------------
 
-class QObject a where
-    render :: a -> String
-
 instance QObject J.Constant where
-    render x = show x
-
-instance QObject J.VMOperandType where
     render x = show x
 
 instance QObject BranchCondition where
@@ -742,9 +773,9 @@ instance QObject Op where
             Neg  l x                      -> (local l) ++ " = -" ++ (local x)
             Coerce l _ t v                -> (local l) ++ " = (" ++ (render t) ++ ")" ++ (local v)
             Cmp l x y                     -> rbinop "<cmp>" l x y
-            New l clazz                   -> (local l) ++ " = new " ++ clazz ++ "()"
-            ANew l (Left t) cnt           -> (local l) ++ " = new " ++ (render t) ++ "[" ++ (local cnt) ++ "]"
-            ANew l (Right clazz) cnt      -> (local l) ++ " = new " ++ clazz      ++ "[" ++ (local cnt) ++ "]"
+            New l clazz                   -> (local l) ++ " = new " ++ clazz      ++ "()"
+            MultiNew l t cnts             -> (local l) ++ " = new " ++ (render t) ++ "(" ++ (locals cnts) ++ ")"
+            ANew l base cnt               -> (local l) ++ " = new " ++ (render base) ++ "[" ++ (local cnt) ++ "]"
             ALength l arr                 -> (local l) ++ " = " ++ (local arr) ++ ".length"
             CheckCast l clazz             -> "check " ++ (local l) ++ " is " ++ clazz
             InstanceOf l obj clazz        -> (local l) ++ " = " ++ (local obj) ++ " instanceof " ++ clazz
@@ -752,7 +783,9 @@ instance QObject Op where
             MonitorExit l                 -> "unlock (" ++ (local l) ++ ")"
             GotoIf cond x y t             -> "if " ++ (local x) ++ " " ++ (render cond) ++ " " ++ (local y) ++ " then goto " ++ (show t)
             Goto t                        -> "goto " ++ (show t)
+            LookupSwitch l tbl def        -> "switch " ++ (local l) ++ "\n\t" ++ (showtbl tbl) ++ "\n\tdefault -> " ++ (show def)
         where
+            showtbl tbl = intercalate "\n\t" $ map (\(l, t) -> ( (show l) ++ " -> " ++ (show t))) tbl
             local l   = "l" ++ (show l)
             locals ls = "(" ++ (intercalate ", " $ map local ls) ++ ")"
             rbinop op l x y = (local l) ++ " = " ++ (local x) ++ " " ++ op ++ " " ++ (local x)

@@ -60,9 +60,9 @@ opType op = case op of
 
     MonitorEnter    -> CanThrow
     MonitorExit     -> CanThrow
-
-    LookupSwitch    _ _     -> error "LookupSwitch not implemented"
-    TableSwitch     _ _ _ _ -> error "LookupSwitch not implemented"
+                    
+    LookupSwitch    tbl def -> AlwaysBranches $ def:(map snd tbl)
+    TableSwitch     _ _ offs def -> AlwaysBranches $ def:offs
     _                 -> NoThrow
     where
         isIntegral OpInt  = True
