@@ -6,6 +6,7 @@ module Java.ClassParser.Class (
     , Method, mAccess, mName, mSig, mCode
     , MethodCode, mcMaxStack, mcMaxLocals, mcCode, mcHandlers    
     , ExceptionHandlerInfo (..)
+    , Access, MethodSig
 ) where
 
 import qualified Data.ByteString.Lazy as B

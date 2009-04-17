@@ -1,9 +1,9 @@
 module Java.ClassParser (
     C.parse
     , Class, clsName, clsSuper, clsIfaces, clsIsInterface, clsMethods
-    , C.Method, C.mAccess, C.mName, C.mSig, C.mCode
-    , C.MethodCode, C.mcMaxStack, C.mcMaxLocals, C.mcCode, C.mcHandlers
-    , C.ExceptionHandlerInfo (..)
+    , Method, mAccess, mName, mSig, mCode
+    , MethodCode, mcMaxStack, mcMaxLocals, mcCode, mcHandlers
+    , ExceptionHandlerInfo (..)
     , VMOp(..), VMOperandType (..), bcCode, BranchCondition(..)
     -- platform classes
     , java_lang_ArrayIndexOutOfBoundsException, java_lang_NullPointerException, java_lang_Throwable

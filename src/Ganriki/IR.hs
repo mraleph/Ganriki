@@ -77,6 +77,7 @@ data Op  = Load !Local J.Constant
          | GotoIf BranchCondition !Local !Local Int
          | Goto Int
          | LookupSwitch !Local [(Int32, Int)] Int         
+         | Catch !Local
 
 newtype BasicBlock = BB { fromBB :: [Op] }
 
@@ -107,8 +108,12 @@ type Translation a = State TranslationContext a
 translate m = toSSA ir
   where 
       (ops, label) = translate'' m
-      ehi          = map (\s -> s { J.ehiStartPC = label $ J.ehiStartPC s, J.ehiEndPC = label $ J.ehiEndPC s, J.ehiHandlerPC = label $ J.ehiHandlerPC s}) $ J.mcHandlers m
-      cfg          = toGraph ehi ops
+      n            = length ops
+      gates        = concatMap (\h -> [Catch (J.mcMaxLocals m), Goto $ label $ J.ehiHandlerPC h]) $ J.mcHandlers m
+      redirect g h = (g + 2, h { J.ehiStartPC = label $ J.ehiStartPC h, J.ehiEndPC = label $ J.ehiEndPC h, J.ehiHandlerPC = g})
+      ops'         = ops ++ gates
+      ehi          = snd $ mapAccumL redirect n (J.mcHandlers m)
+      cfg          = toGraph ehi ops'
       ir           = IR cfg (J.mcMaxLocals m + J.mcMaxStack m + 1)
 
 translate'' :: J.MethodCode -> ([Op], Labeler)
@@ -123,9 +128,9 @@ translate'' m = (ops', label)
 getOffset :: Translation Int
 getOffset = (S.length . tcOps) `liftM` get
 
-translate' :: J.MethodCode -- method to translate
-           -> (Int -> Int) -- label translator
-           -> [(PC, Int)]  -- worklist of locations to process with stack depth
+translate' :: J.MethodCode  -- method to translate
+           -> (Int -> Int)  -- label translator
+           -> [(PC, Int)]   -- worklist of locations to process with stack depth
            -> M.Map PC [Op] -- processed locations
            -> ([Op], M.Map Int Int)
 
@@ -135,7 +140,7 @@ translate' m label ((pc,depth):wl) ops = translate' m label (wl ++ wl') ops'
         s  = execState (translateOp op) (Context depth S.empty label)
 
         ops' = M.insert pc (toList $ tcOps s) ops
-        wl'  = map (\x -> (x, tcStackTop s)) $ filter (not . (`M.member` ops)) (VMControlFlow.targets m pc op)
+        wl'  = map (\(x, ex) -> (x, if ex then (J.mcMaxLocals m) + 1 else tcStackTop s)) $ filter (not . (`M.member` ops) . fst) (VMControlFlow.vmopTargets (J.mcHandlers m) pc op)
         
 
 
@@ -483,36 +488,50 @@ toGraph ehi ops = mkGraph basicblocks branches
         
 
 targets :: [J.ExceptionHandlerInfo] -> PC -> Op -> [PC]
-targets ehi pc op =
-    case op of        
-        Goto pc'               -> [pc']
-        GotoIf _ _ _ pc'       -> [pc', pc+1]        
-        LookupSwitch _ tbl def -> def:(map snd tbl)
+targets ehi pc op = map fst $ VMControlFlow.targets ehi pc (iropControlFlowType op)
 
-        Invoke _ _ _ _     -> (pc+1):handlers
-        InvokeStatic _ _ _ -> (pc+1):handlers
-        GetArray _ _ _     -> (pc+1):handlers
-        PutArray _ _ _     -> (pc+1):handlers
-        PutField _ _ _     -> (pc+1):handlers
-        GetField _ _ _     -> (pc+1):handlers
-        PutStaticField _ _ -> (pc+1):handlers
-        GetStaticField _ _ -> (pc+1):handlers
-        Div  _ _ _         -> (pc+1):handlers
-        Rem  _ _ _         -> (pc+1):handlers
-        New _ _            -> (pc+1):handlers
-        MultiNew _ _ _     -> (pc+1):handlers
-        ANew _ _ _         -> (pc+1):handlers
-        ALength _ _        -> (pc+1):handlers
-        CheckCast _ _      -> (pc+1):handlers
-        MonitorEnter _     -> (pc+1):handlers
-        MonitorExit _      -> (pc+1):handlers
+-- NOTE: we assume that: 
+--   1) all classes are resolved and initialized eagerly before method execution 
+--          => there will be no linking errors
+--   2) there is infinite amount of memory :)
+--          => no out of memory exceptions
 
-        Throw _            -> handlers
-        Return _           -> []
+iropControlFlowType :: Op -> VMControlFlow.OpType
+iropControlFlowType op = case op of
+    GetArray _ _ _ -> VMControlFlow.CanThrow [J.java_lang_ArrayIndexOutOfBoundsException, J.java_lang_NullPointerException]
+    PutArray _ _ _ -> VMControlFlow.CanThrow [J.java_lang_ArrayIndexOutOfBoundsException, J.java_lang_NullPointerException]
+    Div _ _ _      -> VMControlFlow.CanThrow [J.java_lang_ArithmeticException] -- TODO: lost type information
+    Rem _ _ _      -> VMControlFlow.CanThrow [J.java_lang_ArithmeticException] -- TODO: lost type information
 
-        _                  -> [pc+1]
-    where 
-        handlers = map J.ehiHandlerPC $ filter (\h -> (J.ehiStartPC h <= pc) && (pc < J.ehiEndPC h)) $ ehi
+    GotoIf _ _  _ target -> VMControlFlow.CanBranch      [target]
+    Goto target          -> VMControlFlow.AlwaysBranches [target]
+
+    Return  _ -> VMControlFlow.End
+    
+    GetStaticField _ _ -> VMControlFlow.NoThrow
+    PutStaticField _ _ -> VMControlFlow.NoThrow
+    GetField  _ _ _    -> VMControlFlow.CanThrow [J.java_lang_NullPointerException]
+    PutField  _ _ _    -> VMControlFlow.CanThrow [J.java_lang_NullPointerException]
+
+    Invoke  _ _ _ _    -> VMControlFlow.CanThrow [J.java_lang_Throwable]
+    InvokeStatic _ _ _ -> VMControlFlow.CanThrow [J.java_lang_Throwable]
+
+
+    New             _ _   -> VMControlFlow.CanThrow [J.java_lang_InstantiationError]
+    ANew            _ _ _ -> VMControlFlow.CanThrow [J.java_lang_NegativeArraySizeException]                                                   
+    MultiNew        _ _ _ -> VMControlFlow.CanThrow [J.java_lang_NegativeArraySizeException]
+
+    ALength _ _  -> VMControlFlow.CanThrow [J.java_lang_NullPointerException]
+    Throw _      -> VMControlFlow.AlwaysThrows [J.java_lang_Throwable] -- TODO: we can calculate it more accurately later
+
+    CheckCast   _ _ -> VMControlFlow.CanThrow [J.java_lang_ClassCastException]
+    InstanceOf  _ _ _ -> VMControlFlow.NoThrow
+
+    MonitorEnter _   -> VMControlFlow.CanThrow [J.java_lang_NullPointerException]
+    MonitorExit  _   -> VMControlFlow.CanThrow [J.java_lang_NullPointerException, J.java_lang_IllegalMonitorStateException]
+                    
+    LookupSwitch  _ tbl def -> VMControlFlow.AlwaysBranches $ def:(map snd tbl)    
+    _                 -> VMControlFlow.NoThrow
 
 -------------------------------------------------------------------------------
 -- SSA Conversion 
@@ -673,6 +692,7 @@ toSSA ir = ir'
                 MonitorEnter l                -> liftM  (\l'             -> MonitorEnter l')                (active l)
                 MonitorExit l                 -> liftM  (\l'             -> MonitorExit l')                 (active l)
                 LookupSwitch l tbl def        -> liftM  (\l'             -> LookupSwitch l' tbl def)        (active l)
+                Catch l                       -> liftM  (\l'             -> Catch l')                       (version l)
                 Add  l x y                    -> binop' Add  l x y
                 Sub  l x y                    -> binop' Sub  l x y
                 Mul  l x y                    -> binop' Mul  l x y
@@ -723,6 +743,7 @@ toSSA ir = ir'
                 ALength l' _ -> l' == l
                 CheckCast l' _ -> l' == l
                 InstanceOf l' _ _ -> l' == l
+                Catch l' -> l' == l
                 _ -> False
 
 -------------------------------------------------------------------------------------------------------
@@ -784,6 +805,7 @@ instance QObject Op where
             GotoIf cond x y t             -> "if " ++ (local x) ++ " " ++ (render cond) ++ " " ++ (local y) ++ " then goto " ++ (show t)
             Goto t                        -> "goto " ++ (show t)
             LookupSwitch l tbl def        -> "switch " ++ (local l) ++ "\n\t" ++ (showtbl tbl) ++ "\n\tdefault -> " ++ (show def)
+            Catch l                       -> (local l) ++ " = @xobj"
         where
             showtbl tbl = intercalate "\n\t" $ map (\(l, t) -> ( (show l) ++ " -> " ++ (show t))) tbl
             local l   = "l" ++ (show l)

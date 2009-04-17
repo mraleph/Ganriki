@@ -33,7 +33,7 @@ process !done !total (method:methods) = do
     hPutStrLn stderr $ (show done) ++ "/" ++ (show total) ++ "\n"
     putStrLn $ mName method
     case mCode method of
-        Just code -> putStrLn $ show $ irCFG $ translate code
+        Just code -> toFile method code -- putStrLn $ show $ irCFG $ translate code
         Nothing   -> putStrLn "\n(no code)"
     end <- getClockTime
     hPutStrLn stderr $ (mName method) ++ " took " ++ (show $ diffClockTimes end begin) ++ "\n"
@@ -46,6 +46,6 @@ main = do
     ctx     <- loadAndLinkAll sources    
     let classes  = allClasses ctx
     --let classes' = filter (`isSubClassOf` java_lang_ClassLoader) classes    
-    let methods  = concat $ map clsMethods classes
+    let methods  = filter (("initializeMethods" == ) . mName) $ concat $ map clsMethods classes
     let nmethods = length methods
     process 0 nmethods methods    
