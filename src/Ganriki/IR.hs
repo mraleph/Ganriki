@@ -13,7 +13,7 @@ import qualified Ganriki.VMControlFlow as VMControlFlow
 import Ganriki.GDL (toGDL)
 
 import Data.Int (Int32)
-import Data.Maybe (isJust, fromJust)
+import Data.Maybe (isJust, fromJust, catMaybes, mapMaybe)
 import Data.List (find, nub, sort, sortBy, mapAccumL, intercalate)
 import Data.Foldable (toList)
 
@@ -546,6 +546,7 @@ data RenamingState = RenamingState
                      ,   rsActiveStack :: [RenamingMap]
                      ,   rsActiveMaps  :: [(Node, RenamingMap)]
                      ,   rsPhies       :: [(Node, [(Local, Local)])]
+                     ,   rsAlive       :: Set.Set Local
                      }
 
 type Renaming a = State RenamingState a
@@ -607,15 +608,18 @@ toSSA ir = ir'
                                                            , rsActiveStack = []
                                                            , rsActiveMaps  = []
                                                            , rsPhies       = []
+                                                           , rsAlive       = Set.empty
                                                            }
 
         insertPhies :: (Node, BasicBlock) -> (Node, BasicBlock)
         insertPhies node@(n, BB ops) = 
             case lookup n (rsPhies rs) of
                 Nothing    -> node
-                Just phies -> (n, BB $ (map mkPhie phies) ++ ops)
+                Just phies -> (n, BB $ (mapMaybe mkPhie phies) ++ ops)
             where
-                mkPhie (l, l') = Phi l' (map (which l) $ sort $ pre g n)
+                mkPhie (l, l') | l' `Set.member` (rsAlive rs) = Just $ Phi l' (map (which l) $ sort $ pre g n)
+                               | otherwise                  = Nothing
+
                 which l n      = fromJust' "which-1" $ M.lookup l (fromJust' "which-2" $ lookup n (rsActiveMaps rs))
 
         
@@ -624,8 +628,8 @@ toSSA ir = ir'
         rename :: Node -> Renaming [(Node, BasicBlock)]
         rename n = do
             enter n                
-            ops' <- mapM renameOp (getBlock n)
-            rest <- concat `liftM` mapM rename (children n)
+            ops' <- catMaybes `liftM` mapM renameOp (getBlock n)
+            rest <- concat    `liftM` mapM rename (children n)
             leave n
             return $ (n, BB $ ops'):rest
 
@@ -660,15 +664,24 @@ toSSA ir = ir'
         active :: Local -> Renaming Local
         active l = do
             s <- get
-            case M.lookup l (rsActive s) of
-                Nothing -> return l
-                Just l' -> return l'
+            let l' = M.findWithDefault l l (rsActive s)
+            put $ s { rsAlive = Set.insert l' (rsAlive s) }
+            return l'
+
+        renameOp :: Op -> Renaming (Maybe Op)
+        renameOp (Assign l r) = do            
+            s <- get
+            let r' = M.findWithDefault r r (rsActive s)
+            put $ s { rsActive = M.insert l r' (rsActive s) }            
+            return Nothing -- consume assigment            
+
+        renameOp op           = Just `liftM` renameOp' op
             
-        renameOp :: Op -> Renaming Op
-        renameOp op = 
+        renameOp' :: Op -> Renaming Op
+        renameOp' op = 
             case op of
                 Load l c                      -> liftM  (\l'             -> Load l' c)                      (version l)
-                Assign l r                    -> liftM2 (\r' l'          -> Assign l' r')                   (active r) (version l)
+                -- Assign l r                    -> assign l r  -- liftM2 (\r' l'          -> Assign l' r')                   (active r) (version l)
                 Invoke (Just l)  o m args     -> liftM3 (\o' args' l'    -> Invoke (Just l') o' m args')    (active o) (mapM active args) (version l)
                 Invoke (Nothing) o m args     -> liftM2 (\o' args'       -> Invoke (Nothing) o' m args')    (active o) (mapM active args)
                 InvokeStatic (Just l)  m args -> liftM2 (\args' l'       -> InvokeStatic (Just l') m args') (mapM active args) (version l)
