@@ -10,6 +10,8 @@ import Ganriki.GDL (toGDL)
 import Control.Monad
 import Data.List
 
+import Obscuro (emitC)
+
 import System.FilePath
 import System.Directory
 import System.IO
@@ -32,8 +34,11 @@ process !done !total (method:methods) = do
     begin <- getClockTime
     hPutStrLn stderr $ (show done) ++ "/" ++ (show total) ++ "\n"
     putStrLn $ mName method
+    
     case mCode method of
-        Just code -> putStrLn $ show $ irCFG $ translate code -- toFile method code 
+        Just code -> do
+            putStrLn $ show $ mcCode code
+            emitC method $ translate code -- toFile method code 
         Nothing   -> putStrLn "\n(no code)"
     end <- getClockTime
     hPutStrLn stderr $ (mName method) ++ " took " ++ (show $ diffClockTimes end begin) ++ "\n"

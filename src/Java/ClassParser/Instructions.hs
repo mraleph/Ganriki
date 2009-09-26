@@ -6,7 +6,7 @@ module Java.ClassParser.Instructions (
 , VMOp(..)
 , VMOperandType (..)
 , BranchCondition(..)
-, ArrayType, ArrayBaseType) where
+, ArrayType, ArrayBaseType, abType, atBaseType, atDim) where
 
 import Util.QObject
 

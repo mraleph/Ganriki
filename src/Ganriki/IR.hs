@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
-module Ganriki.IR (Op (..), IR(..), translate) where
+module Ganriki.IR (Op (..), IR(..), CFG, translate, BasicBlock (..), Local) where
 
 import Control.Arrow (second)
 
@@ -13,7 +13,7 @@ import qualified Ganriki.VMControlFlow as VMControlFlow
 import Ganriki.GDL (toGDL)
 
 import Data.Int (Int32)
-import Data.Maybe (isJust, fromJust, catMaybes, mapMaybe)
+import Data.Maybe (isJust, fromJust, catMaybes, mapMaybe, maybe)
 import Data.List (find, nub, sort, sortBy, mapAccumL, intercalate)
 import Data.Foldable (toList)
 
@@ -82,7 +82,7 @@ data Op  = Load !Local J.Constant
 newtype BasicBlock = BB { fromBB :: [Op] }
 
 instance Show BasicBlock where
-    show (BB ops) = intercalate "\n" $ map render ops
+    show (BB ops) = (intercalate ";\n" $ map render ops) ++ ";"
 
 type CFG = Gr BasicBlock ()
 data IR  = IR { irCFG :: CFG, irNLocals :: Int } deriving (Show)
@@ -617,8 +617,10 @@ toSSA ir = ir'
                 Nothing    -> node
                 Just phies -> (n, BB $ (mapMaybe mkPhie phies) ++ ops)
             where
-                mkPhie (l, l') | l' `Set.member` (rsAlive rs) = Just $ Phi l' (map (which l) $ sort $ pre g n)
-                               | otherwise                  = Nothing
+                -- BUG [!!!] rsAlive does not take into account usage of locals inside args of Phi functions
+                -- mkPhie (l, l') | l' `Set.member` (rsAlive rs) = Just $ Phi l' (map (which l) $ sort $ pre g n)
+                --               | otherwise                    = Just $ Phi l' (map (which l) $ sort $ pre g n) -- Nothing
+                mkPhie (l, l') = Just $ Phi l' (map (which l) $ sort $ pre g n)
 
                 which l n      = fromJust' "which-1" $ M.lookup l (fromJust' "which-2" $ lookup n (rsActiveMaps rs))
 
@@ -681,7 +683,7 @@ toSSA ir = ir'
         renameOp' op = 
             case op of
                 Load l c                      -> liftM  (\l'             -> Load l' c)                      (version l)
-                -- Assign l r                    -> assign l r  -- liftM2 (\r' l'          -> Assign l' r')                   (active r) (version l)
+                -- Assign l r                    -> liftM2 (\r' l'          -> Assign l' r')                   (active r) (version l)
                 Invoke (Just l)  o m args     -> liftM3 (\o' args' l'    -> Invoke (Just l') o' m args')    (active o) (mapM active args) (version l)
                 Invoke (Nothing) o m args     -> liftM2 (\o' args'       -> Invoke (Nothing) o' m args')    (active o) (mapM active args)
                 InvokeStatic (Just l)  m args -> liftM2 (\args' l'       -> InvokeStatic (Just l') m args') (mapM active args) (version l)
@@ -701,11 +703,12 @@ toSSA ir = ir'
                 ANew l t cnt                  -> liftM2 (\cnt' l'        -> ANew l' t cnt')                 (active cnt) (version l)
                 ALength l arr                 -> liftM2 (\arr' l'        -> ALength l' arr')                (active arr) (version l)
                 CheckCast l clazz             -> liftM  (\l'             -> CheckCast l' clazz)             (active l)
-                InstanceOf l obj clazz        -> liftM2 (\l' obj'        -> InstanceOf l' obj' clazz)       (active obj) (version l)
+                InstanceOf l obj clazz        -> liftM2 (\obj' l'        -> InstanceOf l' obj' clazz)       (active obj) (version l)
                 MonitorEnter l                -> liftM  (\l'             -> MonitorEnter l')                (active l)
                 MonitorExit l                 -> liftM  (\l'             -> MonitorExit l')                 (active l)
                 LookupSwitch l tbl def        -> liftM  (\l'             -> LookupSwitch l' tbl def)        (active l)
                 Catch l                       -> liftM  (\l'             -> Catch l')                       (version l)
+                GotoIf c x y pc               -> liftM2 (\x' y'          -> GotoIf c x' y' pc)              (active x) (active y)
                 Add  l x y                    -> binop' Add  l x y
                 Sub  l x y                    -> binop' Sub  l x y
                 Mul  l x y                    -> binop' Mul  l x y
@@ -780,19 +783,19 @@ instance QObject Op where
             Load l c                      -> (local l) ++ " = " ++ (render c)
             Assign l r                    -> (local l) ++ " = " ++ (local r)
             Phi l args                    -> (local l) ++ " = " ++ "phi " ++ locals args
-            Invoke (Just l)  o m args     -> (local l) ++ " = " ++ (local o) ++ "." ++ (J.mrName m) ++ locals args
-            Invoke (Nothing) o m args     -> (local o) ++ "." ++ (J.mrName m) ++ locals args
+            Invoke (Just l)  o m args     -> (local l) ++ " = " ++ "(*env)->Call" ++ (maybe "Void" suffix $ J.msRetval $ J.mrSig m) ++ "Method(env, " ++ (local o) ++ ", " ++ (J.mrName m) ++ (locals args) ++ ")"
+            Invoke (Nothing) o m args     -> "(*env)->Call" ++ (maybe "Void" suffix $ J.msRetval $ J.mrSig m) ++ "Method(env, " ++ (local o) ++ ", " ++ (J.mrName m) ++ (locals args) ++ ")"
             InvokeStatic (Just l)  m args -> (local l) ++ " = " ++ (J.mrName m) ++ locals args -- TODO: short classname
             InvokeStatic (Nothing) m args -> (J.mrName m) ++ locals args -- TODO: short classname
             GetArray l arr idx            -> (local l) ++ " = " ++ (local arr) ++ "[" ++ (local idx) ++ "]"
             PutArray arr idx val          -> (local arr) ++ "[" ++ (local idx) ++ "] = " ++ (local val) 
-            PutField o f val              -> (local o) ++ "." ++ (J.frName f) ++ " = " ++ (local val) 
-            GetField l o f                -> (local l) ++ " = " ++  (local o) ++ "." ++ (J.frName f)
+            PutField o f val              -> "(*env)->Set" ++ (suffix $ J.frType f) ++ "Field(env, " ++  (local o) ++ ", " ++ (J.frName f) ++ ", " ++ (local val) ++ ")"
+            GetField l o f                -> (local l) ++ " = (*env)->Get" ++ (suffix $ J.frType f) ++ "Field(env, " ++  (local o) ++ ", " ++ (J.frName f) ++ ")"
             PutStaticField f val          -> (J.frName f) ++ " = " ++ (local val) -- TODO: short classname
             GetStaticField l f            -> (local l) ++ " = " ++ (J.frName f)-- TODO: short classname
             Return (Just l)               -> "return " ++ (local l)
             Return (Nothing)              -> "return"
-            Throw l                       -> "thow" ++ (local l)
+            Throw l                       -> "throw " ++ (local l)
             Add  l x y                    -> rbinop "+" l x y
             Sub  l x y                    -> rbinop "-" l x y
             Mul  l x y                    -> rbinop "*" l x y
@@ -806,21 +809,36 @@ instance QObject Op where
             XOr  l x y                    -> rbinop "^" l x y
             Neg  l x                      -> (local l) ++ " = -" ++ (local x)
             Coerce l _ t v                -> (local l) ++ " = (" ++ (render t) ++ ")" ++ (local v)
-            Cmp l x y                     -> rbinop "<cmp>" l x y
+            Cmp l x y                     -> (local l) ++ " = COMPARE(" ++ (local x) ++ ", " ++ (local y) ++ ")"
             New l clazz                   -> (local l) ++ " = new " ++ clazz      ++ "()"
             MultiNew l t cnts             -> (local l) ++ " = new " ++ (render t) ++ "(" ++ (locals cnts) ++ ")"
             ANew l base cnt               -> (local l) ++ " = new " ++ (render base) ++ "[" ++ (local cnt) ++ "]"
-            ALength l arr                 -> (local l) ++ " = " ++ (local arr) ++ ".length"
+            ALength l arr                 -> (local l) ++ " = (*env)->GetArrayLength(env, " ++ (local arr) ++ ")"
             CheckCast l clazz             -> "check " ++ (local l) ++ " is " ++ clazz
             InstanceOf l obj clazz        -> (local l) ++ " = " ++ (local obj) ++ " instanceof " ++ clazz
             MonitorEnter l                -> "lock (" ++ (local l) ++ ")"
             MonitorExit l                 -> "unlock (" ++ (local l) ++ ")"
-            GotoIf cond x y t             -> "if " ++ (local x) ++ " " ++ (render cond) ++ " " ++ (local y) ++ " then goto " ++ (show t)
-            Goto t                        -> "goto " ++ (show t)
+            GotoIf cond x y t             -> "if (" ++ (local x) ++ " " ++ (render cond) ++ " " ++ (local y) ++ ") goto L" ++ (show t)
+            Goto t                        -> "goto L" ++ (show t)
             LookupSwitch l tbl def        -> "switch " ++ (local l) ++ "\n\t" ++ (showtbl tbl) ++ "\n\tdefault -> " ++ (show def)
             Catch l                       -> (local l) ++ " = @xobj"
         where
             showtbl tbl = intercalate "\n\t" $ map (\(l, t) -> ( (show l) ++ " -> " ++ (show t))) tbl
             local l   = "l" ++ (show l)
-            locals ls = "(" ++ (intercalate ", " $ map local ls) ++ ")"
-            rbinop op l x y = (local l) ++ " = " ++ (local x) ++ " " ++ op ++ " " ++ (local x)
+            locals [] = ""
+            locals ls = ", " ++ (intercalate ", " $ map local ls)
+            rbinop op l x y = (local l) ++ " = " ++ (local x) ++ " " ++ op ++ " " ++ (local y)
+
+            suffix t = case t of
+                           J.TArray    _ -> "Object"
+                           J.TInstance _ -> "Object"
+                           J.TByte       -> "Byte"
+                           J.TChar       -> "Char"
+                           J.TDouble     -> "Double"
+                           J.TFloat      -> "Float"
+                           J.TInt        -> "Int"
+                           J.TLong       -> "Long"
+                           J.TShort      -> "Short"
+                           J.TBoolean    -> "Boolean"
+                 
+            

@@ -15,7 +15,7 @@ module Java.ClassParser (
     , CP.FieldRef, CP.frClass, CP.frName, CP.frType
     , CP.msParams, CP.msRetval
     , T.Constant (..), T.ConstantValue (..), T.JType (..)    
-    , ArrayType, ArrayBaseType
+    , ArrayType, ArrayBaseType, atBaseType, atDim, abType
 ) where
 
 -- TODO move methods and related types to separate module
