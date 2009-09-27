@@ -2,3 +2,6 @@ TODO Word* is unsigned, so some sing issues may arise, check!
 TODO use something else instead of Show (use QObject instead of Show!)
 TODO think about providing lifted versions of Get functions in CPGet monad
 TODO think about passing LinkageContext in Reader monad
+TODO separate unliked and linked IR. Should probably use type parameters to avoid code duplication
+TODO Method type should be parameterized by IR type
+TODO support writing of Java bytecode [!!!]
