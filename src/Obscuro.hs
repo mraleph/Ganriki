@@ -206,7 +206,7 @@ infer'' retval m op =
     where
         l |= t = (l,t):m
         settype' ss = ss ++ m
-        typeof' mref = undefined
+        typeof' mref = map typeof $ J.msParams $ J.mrSig mref
         
         
     
